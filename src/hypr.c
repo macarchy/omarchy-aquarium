@@ -63,30 +63,68 @@ int hypr_events_drain(int fd) {
 	return interesting;
 }
 
-int hypr_has_fullscreen(void) {
+/* One request on the command socket, response into buf. Returns the length,
+ * or -1 (buf is always NUL-terminated on success). */
+static ssize_t hypr_query(const char *cmd, char *buf, size_t len) {
 	int fd = hypr_connect(".socket.sock");
 	if (fd < 0) return -1;
 
-	static const char cmd[] = "j/activeworkspace";
-	if (write(fd, cmd, sizeof(cmd) - 1) < 0) {
+	if (write(fd, cmd, strlen(cmd)) < 0) {
 		close(fd);
 		return -1;
 	}
 
-	char buf[8192];
 	size_t off = 0;
 	for (;;) {
-		ssize_t n = read(fd, buf + off, sizeof(buf) - 1 - off);
+		ssize_t n = read(fd, buf + off, len - 1 - off);
 		if (n <= 0) break;
 		off += (size_t)n;
-		if (off >= sizeof(buf) - 1) break;
+		if (off >= len - 1) break;
 	}
 	close(fd);
 	buf[off] = '\0';
+	return off > 0 ? (ssize_t)off : -1;
+}
 
-	if (off == 0) return -1;
+int hypr_has_fullscreen(void) {
+	char buf[8192];
+	if (hypr_query("j/activeworkspace", buf, sizeof(buf)) < 0) return -1;
 	if (strstr(buf, "\"hasfullscreen\": true") ||
 	    strstr(buf, "\"hasfullscreen\":true"))
 		return 1;
+	return 0;
+}
+
+int hypr_cursorpos(int *x, int *y) {
+	char buf[256];
+	if (hypr_query("j/cursorpos", buf, sizeof(buf)) < 0) return -1;
+	const char *px = strstr(buf, "\"x\":");
+	const char *py = strstr(buf, "\"y\":");
+	if (!px || !py) return -1;
+	*x = atoi(px + 4);
+	*y = atoi(py + 4);
+	return 0;
+}
+
+/* The logical position of a named monitor in the global layout — what turns
+ * a global cursor position into an output-local one. Single-monitor setups
+ * get (0,0) either way; this matters when a second display hangs off USB-C. */
+int hypr_monitor_origin(const char *name, int *x, int *y) {
+	char buf[16384];
+	if (hypr_query("j/monitors", buf, sizeof(buf)) < 0) return -1;
+
+	char key[80];
+	snprintf(key, sizeof(key), "\"name\": \"%s\"", name);
+	const char *m = strstr(buf, key);
+	if (!m) {
+		snprintf(key, sizeof(key), "\"name\":\"%s\"", name);
+		m = strstr(buf, key);
+	}
+	if (!m) return -1;
+	const char *px = strstr(m, "\"x\":");
+	const char *py = strstr(m, "\"y\":");
+	if (!px || !py) return -1;
+	*x = atoi(px + 4);
+	*y = atoi(py + 4);
 	return 0;
 }

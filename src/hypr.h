@@ -14,4 +14,11 @@ int hypr_events_drain(int fd);
  * window. Returns 1 yes, 0 no, -1 if the query failed. */
 int hypr_has_fullscreen(void);
 
+/* Global (layout-space) cursor position. Returns 0, or -1 on failure. */
+int hypr_cursorpos(int *x, int *y);
+
+/* Logical position of the named monitor in the global layout.
+ * Returns 0, or -1 when the monitor is unknown or the query failed. */
+int hypr_monitor_origin(const char *name, int *x, int *y);
+
 #endif

@@ -1,16 +1,22 @@
 #!/bin/bash
 # Turn the animated aquarium background on or off.
 #
-#   omarchy-aquarium-toggle [toggle|on|off|status]
+#   omarchy-aquarium-toggle [toggle|on|off|status|startle]
 #
 # Extra flags for the renderer can be put, one per line or space separated, in
 #   ~/.config/omarchy-aquarium/options
 # for example:  --fish 14 --jelly 5 --anemone 3 --turtle 0 --speed 0.8 --fps 24
+#
+# Unless the options contain --no-react, a watcher is started alongside the
+# renderer that startles the tank on desktop notifications
+# (omarchy-aquarium-notify); "startle" pokes the fish by hand.
 
 set -uo pipefail
 
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.pid"
+NOTIFY_PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium-notify.pid"
 LOGFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.log"
+CTLFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.ctl"
 OPTIONS_FILE="$HOME/.config/omarchy-aquarium/options"
 
 DEFAULT_ARGS=(--theme --fps 60)
@@ -41,10 +47,21 @@ start() {
 	fi
 	setsid omarchy-aquarium "${args[@]}" >"$LOGFILE" 2>&1 &
 	echo $! >"$PIDFILE"
+	if [[ " ${args[*]} " != *" --no-react "* ]] \
+	   && command -v omarchy-aquarium-notify >/dev/null; then
+		setsid omarchy-aquarium-notify >/dev/null 2>&1 &
+		echo $! >"$NOTIFY_PIDFILE"
+	fi
 	notify "Aquarium on"
 }
 
 stop() {
+	if [[ -r $NOTIFY_PIDFILE ]]; then
+		# The pid is the script; the dbus-monitor it spawned shares its
+		# session (setsid), so take down the whole group.
+		kill -- -"$(<"$NOTIFY_PIDFILE")" 2>/dev/null
+		rm -f "$NOTIFY_PIDFILE"
+	fi
 	local pid
 	pid=$(running_pid) || { rm -f "$PIDFILE"; return 0; }
 	kill "$pid" 2>/dev/null
@@ -64,8 +81,11 @@ case "${1:-toggle}" in
 			exit 1
 		fi
 		;;
+	startle)
+		[[ -p $CTLFILE ]] && timeout 0.5 bash -c "printf 'startle\n' > '$CTLFILE'"
+		;;
 	*)
-		echo "usage: ${0##*/} [toggle|on|off|status]" >&2
+		echo "usage: ${0##*/} [toggle|on|off|status|startle]" >&2
 		exit 2
 		;;
 esac

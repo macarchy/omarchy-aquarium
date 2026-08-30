@@ -874,6 +874,27 @@ void main() {
         col += (uAccent * 0.45 + uLight * 0.55)
              * exp(-dot(qc, qc) * 2.6) * aBell * 0.10 * clarity;
         col = mix(col, jCol, ten * 0.20 * clarity);
+
+        // Bioluminescence: once the sun is gone the bells stop borrowing
+        // light and make their own — a cold cyan that breathes with the
+        // pulse. Added before the grade, so the factors are boosted to
+        // survive the night pulldown (0.34x and a blue shift) below.
+        float night = 1.0 - uDay;
+        if (night > 0.01) {
+            // Green-heavy on purpose: the grade's blue shift cools it to the
+            // cold cyan real biolume has; a balanced cyan here reads white.
+            vec3 glowC = vec3(0.16, 1.0, 0.52);
+            float breathe = 0.65 + 0.35 * pulse;
+            col += glowC * rim * night * breathe * 0.65 * clarity;
+            col += glowC * exp(-dot(qc, qc) * 2.4)
+                 * aBell * night * breathe * 0.30 * clarity;
+            // A soft aura past the rim: light bleeding into the water. It
+            // fades to nothing well inside the bounding disc, so the entity
+            // gate never shows a seam.
+            col += glowC * exp(-dot(q, q) * 0.60)
+                 * (1.0 - aBell) * night * breathe * 0.10 * clarity;
+            col += glowC * ten * night * 0.20 * clarity;
+        }
     }
 
     // ---- bubbles and drifting particles -------------------------------

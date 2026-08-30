@@ -14,7 +14,8 @@ GEN := build/wlr-layer-shell-unstable-v1-client-protocol.h \
        build/xdg-shell-protocol.c \
        build/shader_frag.h
 
-OBJ := build/main.o build/palette.o build/hypr.o build/seeds.o build/anim.o build/wlr-layer-shell-unstable-v1-protocol.o \
+OBJ := build/main.o build/palette.o build/hypr.o build/seeds.o build/anim.o build/react.o \
+       build/wlr-layer-shell-unstable-v1-protocol.o \
        build/xdg-shell-protocol.o
 
 all: build/omarchy-aquarium
@@ -40,7 +41,7 @@ build/shader_frag.h: build/aquarium.gen.frag | build
 	@sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/' $< >> $@
 	@printf ';\n' >> $@
 
-build/main.o: src/main.c $(GEN) src/palette.h src/hypr.h src/seeds.h src/anim.h | build
+build/main.o: src/main.c $(GEN) src/palette.h src/hypr.h src/seeds.h src/anim.h src/react.h | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
 build/palette.o: src/palette.c src/palette.h | build
@@ -53,6 +54,9 @@ build/seeds.o: src/seeds.c src/seeds.h | build
 
 build/anim.o: src/anim.c src/anim.h src/seeds.h | build
 	$(CC) $(CFLAGS) -ffp-contract=off -c $< -o $@
+
+build/react.o: src/react.c src/react.h src/anim.h src/seeds.h | build
+	$(CC) $(CFLAGS) -c $< -o $@
 
 build/hypr.o: src/hypr.c src/hypr.h | build
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -76,9 +80,11 @@ build/omarchy-aquarium: $(OBJ)
 install: all
 	install -Dm755 build/omarchy-aquarium $(BIN)/omarchy-aquarium
 	install -Dm755 bin/omarchy-aquarium-toggle $(BIN)/omarchy-aquarium-toggle
+	install -Dm755 bin/omarchy-aquarium-notify $(BIN)/omarchy-aquarium-notify
 
 uninstall:
-	rm -f $(BIN)/omarchy-aquarium $(BIN)/omarchy-aquarium-toggle
+	rm -f $(BIN)/omarchy-aquarium $(BIN)/omarchy-aquarium-toggle \
+	      $(BIN)/omarchy-aquarium-notify
 
 clean:
 	rm -rf build
