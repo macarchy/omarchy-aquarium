@@ -1,0 +1,26 @@
+#!/bin/bash
+# Startle the aquarium when a desktop notification arrives.
+#
+# Watches the session bus for org.freedesktop.Notifications Notify calls
+# (BecomeMonitor: read-only, nothing is intercepted — the notification still
+# reaches the shell) and writes "startle" to the renderer's control pipe.
+# The fish dart, then settle. Started and stopped by omarchy-aquarium-toggle.
+set -uo pipefail
+
+CTL="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.ctl"
+COOLDOWN=3   # seconds; a notification storm is one flinch, not a seizure
+
+command -v dbus-monitor >/dev/null || exit 0
+
+last=0
+dbus-monitor --session \
+    "interface='org.freedesktop.Notifications',member='Notify',type='method_call'" 2>/dev/null |
+while IFS= read -r line; do
+	[[ $line == *member=Notify* ]] || continue
+	printf -v now '%(%s)T' -1
+	(( now - last >= COOLDOWN )) || continue
+	last=$now
+	# The renderer holds the pipe open O_RDWR, so this write is instant while
+	# it runs; the timeout covers the window where it has just gone away.
+	[[ -p $CTL ]] && timeout 0.5 bash -c "printf 'startle\n' > '$CTL'" 2>/dev/null
+done

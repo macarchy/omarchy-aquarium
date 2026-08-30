@@ -27,11 +27,15 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "hypr.h"
 #include "palette.h"
 #include "seeds.h"
 #include "anim.h"
+#include "react.h"
 #include "shader_frag.h"
 
 #define MAX_OUTPUTS 8
@@ -48,6 +52,8 @@ struct output {
 	EGLSurface egl_surface;
 
 	int32_t refresh_mhz; /* current mode, 0 if unknown */
+	int mon_x, mon_y;    /* logical position in the global layout */
+	struct react react;  /* cursor + startle scatter state */
 	GLuint lut_tex;      /* per-column floor height + slope */
 	int lut_w;
 	int width, height;   /* logical, from the layer-surface configure */
@@ -102,6 +108,9 @@ static char *opt_shader_src = NULL;
 static enum zwlr_layer_shell_v1_layer opt_layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
 static double opt_battery_fps = 10.0;  /* 0 = never throttle on battery */
 static bool opt_solar = true;
+static bool opt_react = true;
+static int ctl_fd = -1;                /* control pipe: startle et al. */
+static char ctl_path[512];
 
 /* Sun state: the tuned anchor is the default, and what the moon uses. */
 static float sun_x = -0.34f, sun_y = 0.68f, day_f = 1.0f;
@@ -210,6 +219,78 @@ static void update_battery(void) {
 	int c = fgetc(f);
 	fclose(f);
 	if (c == '0' || c == '1') on_battery = (c == '0');
+}
+
+/* ------------------------------------------------------------ reactivity */
+
+/* Refresh each output's position in the global layout: what maps a global
+ * cursor position onto an output. Cheap enough to redo on monitor events. */
+static void update_origins(void) {
+	for (int i = 0; i < MAX_OUTPUTS; i++) {
+		struct output *o = &outputs[i];
+		if (!o->used || !o->name[0]) continue;
+		hypr_monitor_origin(o->name, &o->mon_x, &o->mon_y);
+	}
+}
+
+/* Poll the cursor and hand each output its local view of it, in p-space.
+ * The fish read it in react_step; an output the cursor is not on relaxes. */
+static void update_cursor(void) {
+	if (!opt_react || suspended || hypr_fd < 0) return;
+	static double last;
+	double now = now_sec();
+	if (last != 0.0 && now - last < 1.0 / 15.0) return;
+	last = now;
+
+	int gx, gy;
+	bool have = hypr_cursorpos(&gx, &gy) == 0;
+	for (int i = 0; i < MAX_OUTPUTS; i++) {
+		struct output *o = &outputs[i];
+		if (!o->used || !o->configured) continue;
+		o->react.cur_valid = false;
+		if (!have || o->width <= 0 || o->height <= 0) continue;
+		int lx = gx - o->mon_x, ly = gy - o->mon_y;
+		if (lx < 0 || lx >= o->width || ly < 0 || ly >= o->height) continue;
+		float uvx = (float)lx / (float)o->width;
+		float uvy = 1.0f - (float)ly / (float)o->height;   /* p-space: y up */
+		float asp = (float)o->width / (float)o->height;
+		o->react.cur_x = (uvx - 0.5f) * asp;
+		o->react.cur_y = uvy - 0.5f;
+		o->react.cur_valid = true;
+	}
+}
+
+/* The control pipe: other programs poke the tank. One command per line;
+ * today that is "startle" (a desktop notification arrived — everything
+ * flinches). Opened O_RDWR so there is always a reader: writers never block
+ * and the pipe never signals EOF between them. */
+static void ctl_open(void) {
+	if (!opt_react) return;
+	const char *rt = getenv("XDG_RUNTIME_DIR");
+	snprintf(ctl_path, sizeof(ctl_path), "%s/omarchy-aquarium.ctl",
+	         rt ? rt : "/tmp");
+	struct stat st;
+	if (stat(ctl_path, &st) == 0 && !S_ISFIFO(st.st_mode))
+		unlink(ctl_path);
+	if (mkfifo(ctl_path, 0600) < 0 && errno != EEXIST) {
+		fprintf(stderr, "aquarium: mkfifo %s: %s\n", ctl_path, strerror(errno));
+		return;
+	}
+	ctl_fd = open(ctl_path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+	if (ctl_fd < 0)
+		fprintf(stderr, "aquarium: open %s: %s\n", ctl_path, strerror(errno));
+}
+
+static void ctl_drain(void) {
+	char buf[512];
+	for (;;) {
+		ssize_t n = read(ctl_fd, buf, sizeof(buf) - 1);
+		if (n <= 0) break;
+		buf[n] = '\0';
+		if (strstr(buf, "startle"))
+			react_startle(now_sec());
+		if ((size_t)n < sizeof(buf) - 1) break;
+	}
 }
 
 /* Set by the governor when the display rate cannot be held: a perfectly
@@ -569,6 +650,8 @@ static void draw_frame(struct output *o, double when) {
 		struct anim an;
 		anim_compute(&an, &seed_data, (when - start_time) * opt_speed,
 		             (float)o->bw / (float)o->bh, opt_fish, opt_jelly);
+		if (opt_react)
+			react_step(&o->react, &an, &seed_data, when);
 		anim_upload(program, &an);
 	}
 
@@ -743,6 +826,8 @@ static void ls_configure(void *data, struct zwlr_layer_surface_v1 *ls,
 	o->configured = true;
 	o->inflight = 0;
 	o->frame_drawn = false;   /* any pre-rendered frame is the wrong size now */
+	if (opt_react)
+		hypr_monitor_origin(o->name, &o->mon_x, &o->mon_y);
 	if (!suspended) render(o);
 }
 
@@ -896,6 +981,9 @@ static void usage(void) {
 	"                   real one (location comes from Omarchy's\n"
 	"                   dynamic-wallpaper.json)\n"
 	"  --sun X,Y        pin the sun anchor (implies --no-solar)\n"
+	"  --no-react       ignore the cursor and the control pipe (fish scatter\n"
+	"                   around the pointer and startle on desktop\n"
+	"                   notifications via $XDG_RUNTIME_DIR/omarchy-aquarium.ctl)\n"
 	"  --no-suspend     keep drawing even behind a fullscreen window\n"
 	"  --layer L        bottom (default, above wallpaper) or background\n"
 	"  --shader FILE    load a fragment shader from FILE instead of the built-in\n"
@@ -968,6 +1056,8 @@ static void parse_args(int argc, char **argv) {
 				fprintf(stderr, "aquarium: --sun wants X,Y\n");
 				exit(1);
 			}
+		} else if (!strcmp(a, "--no-react")) {
+			opt_react = false;
 		} else if (!strcmp(a, "--no-suspend")) {
 			opt_suspend = false;
 		} else if (!strcmp(a, "--buffer-scale") && has_next) {
@@ -1067,14 +1157,16 @@ int main(int argc, char **argv) {
 	double stat_last = now_sec();
 	unsigned long stat_last_frames = 0;
 
-	if (opt_suspend) {
+	if (opt_suspend || opt_react) {
 		hypr_fd = hypr_events_open();
 		if (hypr_fd < 0)
 			fprintf(stderr, "aquarium: no Hyprland event socket, "
 			                "drawing unconditionally\n");
-		else
+		else if (opt_suspend)
 			update_suspend();
 	}
+	if (hypr_fd < 0) opt_react = false;   /* no cursor without Hyprland */
+	ctl_open();
 
 	/* Commit a little before the target time. The compositor needs the buffer
 	 * in hand before the vblank it will present on; committing exactly on the
@@ -1087,6 +1179,7 @@ int main(int argc, char **argv) {
 		double sleep_for = 10.0;
 		update_battery();
 		update_solar();
+		update_cursor();
 		{
 			double refresh_hz = 0.0;
 			for (int i = 0; i < MAX_OUTPUTS; i++)
@@ -1118,12 +1211,16 @@ int main(int argc, char **argv) {
 			wl_display_dispatch_pending(display);
 		wl_display_flush(display);
 
-		struct pollfd pfd[2];
-		int nfds = 1;
+		struct pollfd pfd[3];
+		int nfds = 1, hypr_i = -1, ctl_i = -1;
 		pfd[0] = (struct pollfd){.fd = fd, .events = POLLIN};
 		if (hypr_fd >= 0) {
-			pfd[1] = (struct pollfd){.fd = hypr_fd, .events = POLLIN};
-			nfds = 2;
+			hypr_i = nfds;
+			pfd[nfds++] = (struct pollfd){.fd = hypr_fd, .events = POLLIN};
+		}
+		if (ctl_fd >= 0) {
+			ctl_i = nfds;
+			pfd[nfds++] = (struct pollfd){.fd = ctl_fd, .events = POLLIN};
 		}
 
 		int timeout_ms = (int)(sleep_for * 1000.0);
@@ -1138,7 +1235,7 @@ int main(int argc, char **argv) {
 		}
 		wl_display_dispatch_pending(display);
 
-		if (nfds == 2 && (pfd[1].revents & (POLLIN | POLLHUP | POLLERR))) {
+		if (hypr_i >= 0 && (pfd[hypr_i].revents & (POLLIN | POLLHUP | POLLERR))) {
 			int ev = hypr_events_drain(hypr_fd);
 			if (ev < 0) {
 				close(hypr_fd);
@@ -1146,8 +1243,12 @@ int main(int argc, char **argv) {
 				set_suspended(false);   /* fail open: keep the scene alive */
 			} else if (ev > 0) {
 				update_suspend();
+				if (opt_react)
+					update_origins();   /* monitors may have moved */
 			}
 		}
+		if (ctl_i >= 0 && (pfd[ctl_i].revents & POLLIN))
+			ctl_drain();
 
 		if (opt_stats) {
 			double n2 = now_sec();
@@ -1165,6 +1266,10 @@ int main(int argc, char **argv) {
 	}
 
 	if (hypr_fd >= 0) close(hypr_fd);
+	if (ctl_fd >= 0) {
+		close(ctl_fd);
+		unlink(ctl_path);
+	}
 	for (int i = 0; i < MAX_OUTPUTS; i++)
 		if (outputs[i].used) destroy_output(&outputs[i]);
 	if (egl_context != EGL_NO_CONTEXT) {

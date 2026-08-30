@@ -37,6 +37,7 @@ Renderer flags:
     --output NAME    only draw on this output
     --layer L        bottom (default) or background
     --buffer-scale N render at scale N instead of the output's
+    --no-react       ignore the cursor and the control pipe
     --no-suspend     keep drawing even behind a fullscreen window
     --stats          log frames per second every 5s
     --shader FILE    load a fragment shader from FILE instead of the built-in
@@ -50,6 +51,29 @@ The toggle script runs `--theme --fps 60`. To change that, put flags in
 the water hue from it, while sand, stone and fish keep fixed hues — an accent
 colour is allowed to be anything, and blue sand does not read as sand. An
 installed `theme-set` hook restarts the aquarium when the theme changes.
+
+## Reactivity
+
+The tank notices the desktop, and all of it is CPU-side — the shader gets the
+same uniforms either way, so reacting costs nothing per pixel:
+
+- **The cursor.** Fish keep a polite distance: bring the pointer near one and
+  it darts away, nose pitched into the motion, then drifts back to its path.
+  Close (large) fish are shyer than distant ones. The cursor is polled from
+  Hyprland at 15 Hz; the layer surface itself still takes no input.
+- **Notifications.** `omarchy-aquarium-notify` (started by the toggle) watches
+  the session bus read-only; a desktop notification writes `startle` to the
+  control pipe at `$XDG_RUNTIME_DIR/omarchy-aquarium.ctl` and the whole tank
+  flinches — each fish bolts along its swimming direction and settles over a
+  few seconds. Try it: `omarchy-aquarium-toggle startle`. Anything else can
+  poke the same pipe.
+- **Night.** After civil twilight (the same solar tracking that moves the
+  sun), the jellyfish become faintly bioluminescent: a cold cyan glow that
+  breathes with the bell's pulse. This is the one shader-side piece, gated to
+  jelly pixels; the daytime image is bit-identical to before.
+
+`--no-react` turns off the cursor and the pipe (the night glow rides `--day`
+/ solar state, not reactivity).
 
 ## Cost
 
