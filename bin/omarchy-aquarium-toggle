@@ -1,0 +1,71 @@
+#!/bin/bash
+# Turn the animated aquarium background on or off.
+#
+#   omarchy-aquarium-toggle [toggle|on|off|status]
+#
+# Extra flags for the renderer can be put, one per line or space separated, in
+#   ~/.config/omarchy-aquarium/options
+# for example:  --fish 14 --jelly 5 --anemone 3 --turtle 0 --speed 0.8 --fps 24
+
+set -uo pipefail
+
+PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.pid"
+LOGFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.log"
+OPTIONS_FILE="$HOME/.config/omarchy-aquarium/options"
+
+DEFAULT_ARGS=(--theme --fps 60)
+
+notify() {
+	command -v notify-send >/dev/null || return 0
+	notify-send -a "Aquarium" -t 2000 "$1" "${2-}"
+}
+
+running_pid() {
+	local pid
+	[[ -r $PIDFILE ]] || return 1
+	pid=$(<"$PIDFILE")
+	[[ -n $pid ]] || return 1
+	# Make sure the pid was not recycled by some other program.
+	[[ $(tr -d '\0' </proc/"$pid"/comm 2>/dev/null) == omarchy-aquari* ]] || return 1
+	echo "$pid"
+}
+
+start() {
+	if running_pid >/dev/null; then
+		return 0
+	fi
+	local args=("${DEFAULT_ARGS[@]}")
+	if [[ -r $OPTIONS_FILE ]]; then
+		# shellcheck disable=SC2207
+		args=($(grep -v '^[[:space:]]*#' "$OPTIONS_FILE" | tr '\n' ' '))
+	fi
+	setsid omarchy-aquarium "${args[@]}" >"$LOGFILE" 2>&1 &
+	echo $! >"$PIDFILE"
+	notify "Aquarium on"
+}
+
+stop() {
+	local pid
+	pid=$(running_pid) || { rm -f "$PIDFILE"; return 0; }
+	kill "$pid" 2>/dev/null
+	rm -f "$PIDFILE"
+	notify "Aquarium off"
+}
+
+case "${1:-toggle}" in
+	on)     start ;;
+	off)    stop ;;
+	toggle) if running_pid >/dev/null; then stop; else start; fi ;;
+	status)
+		if pid=$(running_pid); then
+			echo "running (pid $pid)"
+		else
+			echo "stopped"
+			exit 1
+		fi
+		;;
+	*)
+		echo "usage: ${0##*/} [toggle|on|off|status]" >&2
+		exit 2
+		;;
+esac
