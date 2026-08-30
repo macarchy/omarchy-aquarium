@@ -36,7 +36,9 @@ void react_step(struct react *r, struct anim *a, const struct seeds *s,
 		float tx = 0.0f, ty = 0.0f;
 		if (r->cur_valid) {
 			float dx = px - r->cur_x, dy = py - r->cur_y;
-			float R = 0.15f + 0.21f * lay;
+			/* Per-fish temperament: some are shyer than others. */
+			float shy = 0.75f + 0.5f * s->fish[i][0];
+			float R = (0.12f + 0.16f * lay) * shy;
 			float d2 = dx * dx + dy * dy;
 			if (d2 < R * R) {
 				float d = sqrtf(d2);
@@ -49,23 +51,25 @@ void react_step(struct react *r, struct anim *a, const struct seeds *s,
 					uy = 0.3f;
 					d = 0.0f;
 				}
-				float push = (R - d) * 1.35f;
+				/* Mostly horizontal: fish swim away, they don't strafe. */
+				float push = (R - d) * 0.75f;
 				tx = ux * push;
-				ty = uy * push;
+				ty = uy * push * 0.35f;
 			}
 		}
 
-		/* Startle: a burst along the swimming direction, with a per-fish
-		 * vertical scatter so the tank doesn't move as one rigid sheet. */
+		/* Startle: a small flinch along the swimming direction, with a
+		 * per-fish vertical scatter so the tank doesn't move as one sheet. */
 		if (startle > 0.0f) {
 			float dir = s->fish[i][3] < 0.5f ? -1.0f : 1.0f;
-			tx += dir * startle * (0.10f + 0.14f * lay);
-			ty += (s->fish[i][1] - 0.5f) * startle * 0.12f;
+			tx += dir * startle * (0.05f + 0.07f * lay);
+			ty += (s->fish[i][1] - 0.5f) * startle * 0.05f;
 		}
 
-		/* Spring toward the target: dart fast, drift back slowly. */
+		/* Spring toward the target: pull away at swimming speed, then
+		 * drift back warily — the return should be barely noticeable. */
 		float ox = r->off[i][0], oy = r->off[i][1];
-		float rate = (tx * tx + ty * ty > ox * ox + oy * oy) ? 7.0f : 1.4f;
+		float rate = (tx * tx + ty * ty > ox * ox + oy * oy) ? 3.5f : 0.55f;
 		float k = 1.0f - expf(-rate * dt);
 		float nx = ox + (tx - ox) * k;
 		float ny = oy + (ty - oy) * k;
@@ -80,7 +84,7 @@ void react_step(struct react *r, struct anim *a, const struct seeds *s,
 		 * for left-swimmers flips both the nose and the apparent rotation, so
 		 * one sign serves both directions. */
 		float vy = (ny - oy) / dt;
-		float dtilt = clampf(-vy * 0.8f, -0.45f, 0.45f);
+		float dtilt = clampf(-vy * 0.45f, -0.22f, 0.22f);
 		float cd = cosf(dtilt), sd = sinf(dtilt);
 		float c0 = a->fish[i][2], s0 = a->fish[i][3];
 		a->fish[i][2] = c0 * cd - s0 * sd;
@@ -99,17 +103,17 @@ void react_step(struct react *r, struct anim *a, const struct seeds *s,
 		if (r->cur_valid) {
 			float dx = (a->school[0] + r->school[0]) - r->cur_x;
 			float dy = (a->school[1] + r->school[1]) - r->cur_y;
-			float R = 0.30f;
+			float R = 0.26f;
 			float d2 = dx * dx + dy * dy;
 			if (d2 < R * R && d2 > 1e-8f) {
 				float d = sqrtf(d2);
-				tx = dx / d * (R - d) * 1.1f;
-				ty = dy / d * (R - d) * 1.1f;
+				tx = dx / d * (R - d) * 0.6f;
+				ty = dy / d * (R - d) * 0.25f;
 			}
 		}
-		tx += startle * 0.30f;
+		tx += startle * 0.14f;
 		float ox = r->school[0], oy = r->school[1];
-		float rate = (tx * tx + ty * ty > ox * ox + oy * oy) ? 6.0f : 1.2f;
+		float rate = (tx * tx + ty * ty > ox * ox + oy * oy) ? 3.0f : 0.5f;
 		float k = 1.0f - expf(-rate * dt);
 		r->school[0] = ox + (tx - ox) * k;
 		r->school[1] = oy + (ty - oy) * k;
