@@ -78,11 +78,35 @@ same uniforms either way, so reacting costs nothing per pixel:
 ## Cost
 
 At the native 2560x1600 buffer on an M2 (Asahi, Mesa) the full scene renders in
-**~16 ms/frame with the GPU saturated**, and more slowly at the low clocks the
-firmware grants a light duty cycle. Do not benchmark it with back-to-back draws
-into one framebuffer: Apple GPUs hidden-surface-remove every opaque draw but
-the last, and that bench reports a fantasy (0.4 ms). `--bench N --pipe` in the
-preview alternates render targets and reports the honest number.
+**~11 ms/frame with the GPU saturated**, and more slowly at the low clocks the
+firmware grants a light duty cycle.
+
+Two traps, both of which have cost real time here:
+
+**Do not benchmark with back-to-back draws into one framebuffer.** Apple GPUs
+hidden-surface-remove every opaque draw but the last, and that bench reports a
+fantasy (0.4 ms). `--bench N --pipe` alternates render targets instead.
+
+**Do not compare an absolute timing against one taken earlier.** The GPU's
+clock state is a hidden variable: this renderer holds clocks up with a
+permanent trickle draw, and sustained benching starves it into its even-30
+lock, after which everything measures ~25% slower until it recovers -- which it
+cannot while the benching continues. It is not thermal and cooling down does
+not fix it. Byte-identical code measured 10.90 ms and 13.50 ms two hours apart
+in one session. Only an A/B taken minutes apart means anything, which is what
+`bench/eval.py` does:
+
+    git worktree add ../omarchy-aquarium-ref <baseline-commit>
+    make -C ../omarchy-aquarium-ref all preview
+    python3 bench/eval.py --record        # golden frames, once
+    python3 bench/eval.py --split dev     # score a change
+
+It renders ten golden frames and gates on the 99.9th percentile of the
+per-channel delta rather than the mean -- dropping three of five jellyfish
+moves the mean by 0.22 of 255 and sails past any mean threshold, but spikes
+p999 to 29 -- then benches candidate against reference alternately and scores
+the ratio of the minima. `--split test` is the held-out half; keep it for the
+final check.
 
 What keeps the cost down:
 
