@@ -683,7 +683,13 @@ void main() {
     if (uv.y < 0.40) {
     vec4 flut = texture2D(uFloorLUT, vec2(uv.x, 0.5));
     fh = dot(flut.rg, vec2(65280.0, 255.0)) * LUT_DEC;
-    nearFloor = step(uv.y, fh + 0.20);
+    // How far above the dune line anything gated by this can reach. Rocks top
+    // out at fh + 0.056 (a disc of radius rh*1.16 seated at fh - rh*0.45),
+    // starfish at fh + 0.003, and the tallest, an anemone, at fh + 0.118: its
+    // base sits at fh + rh*0.41 and its fan reaches 1.07*len. 0.13 keeps a
+    // tenth of margin; 0.20 was pulling three unrolled loops, two of them with
+    // atan calls, into a band 60% taller than anything can occupy.
+    nearFloor = step(uv.y, fh + 0.13);
     float sandMask = smoothstep(fh + 0.012, fh - 0.012, uv.y);
     if (sandMask > 0.001) {
         // Sand lit through the water: its own hue, dimmed and tinted by depth.
