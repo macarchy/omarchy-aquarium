@@ -1,2 +1,5 @@
 build/
 *.ppm
+bench/golden/
+bench/_tmp/
+__pycache__/

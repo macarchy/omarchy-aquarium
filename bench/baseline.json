@@ -1,0 +1,11 @@
+{
+  "ms_per_frame": 10.898,
+  "bench_res": [
+    2560,
+    1600
+  ],
+  "pss_mb": 17.938,
+  "memory_note": null,
+  "recorded": "2026-09-01T12:26:50+0200",
+  "commit": "fe0e638e1e4182863b280e1765fe09854e9b4583"
+}
