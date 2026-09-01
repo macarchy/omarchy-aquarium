@@ -53,6 +53,37 @@ GOLDEN = _golden_dir()
 PREVIEW = ROOT / "build" / "aquarium-preview"
 CLIENT = ROOT / "build" / "omarchy-aquarium"
 
+# The reference checkout: the baseline commit, built once, kept beside the main
+# repo and benched against the candidate IN THE SAME RUN.
+#
+# Absolute timings on this machine are not comparable across time. The GPU's
+# clock state is a hidden variable -- the live aquarium daemon holds clocks up
+# with a permanent trickle draw, and heavy benching starves it into its 30 fps
+# lock, after which everything measures ~25% slower until it recovers. Trunk
+# itself measured 10.90 ms and then 13.50 ms for byte-identical output within
+# two hours. Only an A/B taken minutes apart means anything, so every eval
+# rebuilds nothing on the reference side and interleaves the two.
+def _ref_dir():
+    """As with the goldens, an executor in a `git worktree` must reach the
+    reference built beside the MAIN checkout, not a sibling of its own temp
+    directory."""
+    env = os.environ.get("AQUARIUM_REF")
+    if env:
+        return pathlib.Path(env)
+    common = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute",
+         "--git-common-dir"], capture_output=True, text=True)
+    if common.returncode == 0 and common.stdout.strip():
+        main_root = pathlib.Path(common.stdout.strip()).parent
+        return main_root.parent / (main_root.name + "-ref")
+    return ROOT.parent / (ROOT.name + "-ref")
+
+
+REF = _ref_dir()
+REF_PREVIEW = REF / "build" / "aquarium-preview"
+REF_CLIENT = REF / "build" / "omarchy-aquarium"
+PAIRS = 5    # A/B/B/A/...; the ratio of MINIMA is what gets scored
+
 # Bench resolution: the panel's own, because occupancy (111 GPRs, 896/1024
 # threads) is what the shader is bound by and that only shows at full size.
 BENCH_W, BENCH_H = 2560, 1600
@@ -177,19 +208,42 @@ def fidelity(split, tmp):
     return results, worst
 
 
-def bench():
-    """Median of BENCH_REPEATS.  Run-to-run spread is ~0.06%, so a median of
-    three separates a real 1% win from noise without costing a minute."""
-    times = []
-    for _ in range(BENCH_REPEATS):
-        r = run([str(PREVIEW), "--width", str(BENCH_W), "--height", str(BENCH_H),
-                 "--bench", str(BENCH_FRAMES), "--pipe"])
-        m = re.search(r"pipelined\s+([0-9.]+)\s+ms/frame", r.stderr + r.stdout)
-        if not m:
-            return None, f"bench produced no timing: {(r.stderr or r.stdout)[-800:]}"
-        times.append(float(m.group(1)))
-    times.sort()
-    return times[len(times) // 2], None
+def bench_once(binary):
+    r = run([str(binary), "--width", str(BENCH_W), "--height", str(BENCH_H),
+             "--bench", str(BENCH_FRAMES), "--pipe"])
+    m = re.search(r"pipelined\s+([0-9.]+)\s+ms/frame", r.stderr + r.stdout)
+    if not m:
+        return None, f"bench produced no timing: {(r.stderr or r.stdout)[-800:]}"
+    return float(m.group(1)), None
+
+
+def med(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2]
+
+
+def bench_paired():
+    """Interleave candidate and reference so both see the same clock state.
+
+    Scored on the MINIMUM of each side, not the median. The DVFS governor only
+    ever costs time -- a run can collapse to 29 ms and back inside one eval --
+    so the fastest observation is the least contaminated one, and a median just
+    averages in however much sag happened to land on that side. The order is
+    flipped every pair so a monotonic drift cannot favour whichever side goes
+    first."""
+    cand, ref = [], []
+    for i in range(PAIRS):
+        order = [(PREVIEW, cand), (REF_PREVIEW, ref)]
+        if i % 2:
+            order.reverse()
+        for binary, sink in order:
+            v, e = bench_once(binary)
+            if e:
+                return None, ("candidate " if sink is cand else "reference ") + e
+            sink.append(v)
+    return {"ms_per_frame": min(cand), "ref_ms_per_frame": min(ref),
+            "speedup": round(min(ref) / min(cand), 4),
+            "cand_runs": cand, "ref_runs": ref}, None
 
 
 MEM_SETTLE = 10.0    # Mesa frees its shader-compile scratch around 8 s in;
@@ -198,12 +252,12 @@ MEM_LAUNCHES = 3     # cross-launch spread is ~3% with a one-sided high tail
 MEM_DEADBAND = 0.010 # min-of-3 is reproducible to ~0.5%; ignore smaller moves
 
 
-def _probe_once():
+def _probe_once(client=None):
     """One launch, parked on the `background` layer where the opaque
     omarchy-background surface hides it, so measuring costs the desktop
     nothing."""
     proc = subprocess.Popen(
-        [str(CLIENT), "--layer", "background", "--no-react", "--no-suspend",
+        [str(client or CLIENT), "--layer", "background", "--no-react", "--no-suspend",
          "--theme", "--fps", "60"],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     try:
@@ -221,7 +275,7 @@ def _probe_once():
             proc.kill()
 
 
-def memory():
+def memory(client=None):
     """Steady-state footprint of the real client.
 
     RSS is mostly Mesa's shared LLVM and lies about what a second copy would
@@ -237,7 +291,7 @@ def memory():
         return None, "no WAYLAND_DISPLAY -- memory probe needs the live compositor"
     runs = []
     for _ in range(MEM_LAUNCHES):
-        got, err = _probe_once()
+        got, err = _probe_once(client)
         if err:
             return None, err
         runs.append(got)
@@ -273,7 +327,7 @@ def main():
                 if e:
                     print(e, file=sys.stderr)
                     return 1
-        ms, e = bench()
+        ms, e = bench_once(PREVIEW)
         if e:
             print(e, file=sys.stderr)
             return 1
@@ -281,16 +335,13 @@ def main():
         base = {"ms_per_frame": ms, "bench_res": [BENCH_W, BENCH_H],
                 "pss_mb": (mem or {}).get("pss_mb"), "memory_note": memerr,
                 "recorded": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-                "commit": run(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.strip()}
+                "commit": run(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).stdout.strip(),
+                "note": "Context only. Scoring is a paired A/B against the "
+                        "reference build; absolute timings on this machine are "
+                        "not comparable across time."}
         BASELINE.write_text(json.dumps(base, indent=2) + "\n")
         print(json.dumps(base, indent=2))
         return 0
-
-    if not BASELINE.exists():
-        print(json.dumps({**out, "score": 0.0,
-                          "error": "no bench/baseline.json -- run --record first"}, indent=2))
-        return 1
-    base = json.loads(BASELINE.read_text())
 
     fid, worst = fidelity(a.split, tmp)
     out["fidelity"] = fid
@@ -300,31 +351,40 @@ def main():
         print(json.dumps(out, indent=2))
         return 1
 
-    ms, e = bench()
+    if not REF_PREVIEW.exists():
+        print(json.dumps({**out, "score": 0.0,
+                          "error": "no reference build at %s -- create it with "
+                                   "`git worktree add %s <baseline-commit> && "
+                                   "make -C %s all preview`" % (REF, REF, REF)},
+                         indent=2))
+        return 1
+
+    b, e = bench_paired()
     if e:
         print(json.dumps({**out, "score": 0.0, "error": e}, indent=2))
         return 1
-    out["ms_per_frame"] = ms
-    out["speedup"] = round(base["ms_per_frame"] / ms, 4)
+    out.update(b)
 
     mem_ratio = 1.0
     if a.no_memory:
         out["memory"] = "skipped"
     else:
-        mem, memerr = memory()
-        out["memory"] = mem or memerr
-        if mem and base.get("pss_mb"):
-            out["pss_mb"] = mem["pss_mb"]
-            raw = base["pss_mb"] / mem["pss_mb"]
-            # Deadband: the probe is good to ~0.3% but drifts further under
-            # load, and a memory "win" inside that band is measurement, not
-            # work.  Only moves bigger than MEM_DEADBAND reach the score.
+        mc, e1 = memory(CLIENT)
+        mr, e2 = memory(REF_CLIENT)
+        if e1 or e2:
+            out["memory"] = e1 or e2
+        else:
+            out["pss_mb"] = mc["pss_mb"]
+            out["ref_pss_mb"] = mr["pss_mb"]
+            out["private_dirty_mb"] = mc["private_dirty_mb"]
+            raw = mr["pss_mb"] / mc["pss_mb"]
+            # min-of-3 reproduces to ~0.5%; a "win" inside 1% is measurement.
             mem_ratio = 1.0 if abs(raw - 1.0) < MEM_DEADBAND else raw
             out["memory_ratio"] = round(mem_ratio, 4)
             out["memory_ratio_raw"] = round(raw, 4)
 
     # Frame time is what the user sees every 16.7 ms; PSS is a background cost
-    # on a 16 GB laptop.  Weighted 3:1, baseline == 1.0, higher is better.
+    # on a 16 GB laptop. Weighted 3:1, 1.0 == reference, higher is better.
     out["score"] = round(0.75 * out["speedup"] + 0.25 * mem_ratio, 4)
     print(json.dumps(out, indent=2))
     return 0
