@@ -287,7 +287,20 @@ vec2 starfish(vec2 uv, float asp, float count) {
 // ribbons with lobed edges rather than grass.
 float seaweed(vec2 uv, float t, float asp, float count) {
     float m = 0.0;
-    float wbound = 0.056 + 0.078 / asp;
+    // How far a blade can reach from its root. The old bound added the
+    // maxima of sway and of width, but those never happen together: sway
+    // grows as k*k toward the tip, where the ribbon has already tapered to
+    // nothing, and the ribbon only widens above k 0.35, where sway is still
+    // a quarter of its peak. Summing them overstated the reach by up to
+    // 2.3x, and every column inside the difference paid a floor-LUT fetch
+    // and a whole blade body to find out it was outside the blade.
+    //
+    // This is max over k of (sway(k) + w(k)) with both sines at +1 and the
+    // broad flag set, fitted to within 5% over aspect 0.4 to 3.0. The first
+    // term is the tip regime, sway-dominated and aspect-free; the second is
+    // the k~0.5 regime, where width dominates and grows as 1/asp -- which is
+    // why a portrait output still needs the wider bound.
+    float wbound = max(0.0585, 0.004 + 0.0520 / asp);
     // Blades belong to one of three groves and can never reach further than
     // the grove's jitter plus a blade's own reach; a pixel outside the band
     // skips that grove's blades wholesale. Blade indices stay fi = 3k + g,
