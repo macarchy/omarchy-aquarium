@@ -78,7 +78,7 @@ same uniforms either way, so reacting costs nothing per pixel:
 ## Cost
 
 At the native 2560x1600 buffer on an M2 (Asahi, Mesa) the full scene renders in
-**~11 ms/frame with the GPU saturated**, and more slowly at the low clocks the
+**~9.7 ms/frame with the GPU saturated**, and more slowly at the low clocks the
 firmware grants a light duty cycle.
 
 Two traps, both of which have cost real time here:
@@ -86,6 +86,18 @@ Two traps, both of which have cost real time here:
 **Do not benchmark with back-to-back draws into one framebuffer.** Apple GPUs
 hidden-surface-remove every opaque draw but the last, and that bench reports a
 fantasy (0.4 ms). `--bench N --pipe` alternates render targets instead.
+
+**Two things the AGX compiler does that change what is worth optimising.** It
+predicates short loop bodies instead of branching -- the shader reports zero
+loops and zero spills, everything is flattened -- so a `continue` guarding a
+few instructions does not skip them, it only adds the test. Gating cheap work
+is therefore worthless; a bound is only worth tightening when its body is big
+enough to become a real branch (the seaweed blade and the anemone tentacle fan
+are, a bubble's ring is not). And it packs two 16-bit values per register at
+double issue rate, so `precision` is a first-class lever: this shader is
+register-width-bound, and compiling it wholly `mediump` reaches 47 GPRs and
+1.835x on an image that is wrong. Check `AGX_MESA_DEBUG=shaderdb` and expect
+the instruction count to fall, not rise.
 
 **Do not compare an absolute timing against one taken earlier.** The GPU's
 clock state is a hidden variable: this renderer holds clocks up with a
