@@ -21,6 +21,20 @@
 #include "anim.h"
 #include "shader_frag.h"
 
+/* Linear divisor for the background target: the smooth layers are baked at
+ * 1/BG_DIV in each axis, so 1/(BG_DIV*BG_DIV) of the pixels and of the memory.
+ * Bilinear magnification puts them back.
+ *
+ * Swept 2..16 against the golden frames. 8 is the floor of the cost curve
+ * (12.13 / 11.59 / 10.15 ms at 2 / 4 / 8, then back up to 10.40 and 11.47 at
+ * 12 and 16 as the bake stops dominating and the upsample starts to), and it
+ * is still nowhere near the fidelity limit: the worst per-channel delta across
+ * day, golden hour and night is 4 of 255, p999 = 2, against a gate of 12.
+ * Smoothness is not what runs out here. */
+#ifndef BG_DIV
+#define BG_DIV 8
+#endif
+
 static const char *VERT =
 	"attribute vec2 aPos;\n"
 	"void main() { gl_Position = vec4(aPos, 0.0, 1.0); }\n";
@@ -220,6 +234,56 @@ int main(int argc, char **argv) {
 		ray_ut = glGetUniformLocation(ray_prog, "uTime");
 	}
 
+	/* Half-resolution background pass: the smooth layers, re-baked every
+	 * frame because they move with uTime and the sun. Bilinear magnification
+	 * is the whole point -- these layers carry nothing sharper than it. */
+	GLuint bg_prog, bg_tex, bg_fb;
+	GLint bg_ut;
+	const int BW = (W + BG_DIV - 1) / BG_DIV, BH = (H + BG_DIV - 1) / BG_DIV;
+	{
+		const char *fsrc = shader ? shader : AQUARIUM_FRAG;
+		size_t ln = strlen(fsrc) + 64;
+		char *bsrc = malloc(ln);
+		snprintf(bsrc, ln, "#define BG_PASS\n%s", fsrc);
+		bg_prog = glCreateProgram();
+		glAttachShader(bg_prog, compile(GL_VERTEX_SHADER, VERT, "vertex"));
+		glAttachShader(bg_prog, compile(GL_FRAGMENT_SHADER, bsrc, "background"));
+		free(bsrc);
+		glBindAttribLocation(bg_prog, 0, "aPos");
+		glLinkProgram(bg_prog);
+		glGenTextures(1, &bg_tex);
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_2D, bg_tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, BW, BH, 0,
+		             GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glActiveTexture(GL_TEXTURE0);
+		glGenFramebuffers(1, &bg_fb);
+		glBindFramebuffer(GL_FRAMEBUFFER, bg_fb);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+		                       GL_TEXTURE_2D, bg_tex, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, fb);
+		glUseProgram(bg_prog);
+		glUniform1i(glGetUniformLocation(bg_prog, "uRayLUT"), 1);
+		glUniform2f(glGetUniformLocation(bg_prog, "uRes"), (float)BW, (float)BH);
+		glUniform3fv(glGetUniformLocation(bg_prog, "uDeep"), 1, pal.deep);
+		glUniform3fv(glGetUniformLocation(bg_prog, "uShallow"), 1, pal.shallow);
+		glUniform2f(glGetUniformLocation(bg_prog, "uSun"), sun_x, sun_y);
+		bg_ut = glGetUniformLocation(bg_prog, "uTime");
+	}
+
+/* The ray strip feeds the background pass, so it has to be baked first. */
+#define DRAW_BG(tv) do { \
+		glBindFramebuffer(GL_FRAMEBUFFER, bg_fb); \
+		glViewport(0, 0, BW, BH); \
+		glUseProgram(bg_prog); \
+		glUniform1f(bg_ut, (tv)); \
+		glDrawArrays(GL_TRIANGLES, 0, 3); \
+	} while (0)
+
 #define DRAW_RAY_LUT(tv) do { \
 		glBindFramebuffer(GL_FRAMEBUFFER, ray_fb); \
 		glViewport(0, 0, 2048, 1); \
@@ -229,11 +293,13 @@ int main(int argc, char **argv) {
 	} while (0)
 
 	DRAW_RAY_LUT(t);
+	DRAW_BG(t);
 	glBindFramebuffer(GL_FRAMEBUFFER, fb);
 	glViewport(0, 0, W, H);
 	glUseProgram(prog);
 	glUniform1i(glGetUniformLocation(prog, "uFloorLUT"), 0);
 	glUniform1i(glGetUniformLocation(prog, "uRayLUT"), 1);
+	glUniform1i(glGetUniformLocation(prog, "uBG"), 2);
 	glUniform2f(glGetUniformLocation(prog, "uRes"), (float)W, (float)H);
 	glUniform1f(glGetUniformLocation(prog, "uTime"), t);
 	glUniform3fv(glGetUniformLocation(prog, "uDeep"), 1, pal.deep);
@@ -275,6 +341,7 @@ int main(int argc, char **argv) {
 		clock_gettime(CLOCK_MONOTONIC, &a2);
 		for (int i = 0; i < frames; i++) {
 			DRAW_RAY_LUT(t + (float)i / 60.0f);
+			DRAW_BG(t + (float)i / 60.0f);
 			glBindFramebuffer(GL_FRAMEBUFFER, i & 1 ? fb2 : fb);
 			glViewport(0, 0, W, H);
 			glUseProgram(prog);
@@ -300,6 +367,7 @@ int main(int argc, char **argv) {
 			for (int i = 0; i < frames; i++) {
 				clock_gettime(CLOCK_MONOTONIC, &a);
 				DRAW_RAY_LUT(t + (float)i / 60.0f);
+				DRAW_BG(t + (float)i / 60.0f);
 				glBindFramebuffer(GL_FRAMEBUFFER, fb);
 				glViewport(0, 0, W, H);
 				glUseProgram(prog);
@@ -324,6 +392,7 @@ int main(int argc, char **argv) {
 			clock_gettime(CLOCK_MONOTONIC, &a);
 			for (int i = 0; i < frames; i++) {
 				DRAW_RAY_LUT(t + (float)i / 30.0f);
+				DRAW_BG(t + (float)i / 30.0f);
 				glBindFramebuffer(GL_FRAMEBUFFER, fb);
 				glViewport(0, 0, W, H);
 				glUseProgram(prog);

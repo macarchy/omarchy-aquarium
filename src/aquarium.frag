@@ -520,10 +520,59 @@ vec2 fish_sdf(vec2 p, float wag) {
 // the dune line within 4e-6 of the analytic value.
 
 uniform sampler2D uFloorLUT;
+uniform sampler2D uBG;   // half-res background: .rgb water column, .a additive light
 
 const float LUT_DEC = 0.25 / 65535.0;
 
-#ifdef RAY_LUT_PASS
+// The scene splits by spatial frequency, not by object. Everything below is
+// smooth to within a few cycles across the whole screen -- a vertical gradient,
+// two low-octave fbms, two exponential falloffs off the sun, and the ray
+// shafts -- so it carries no detail that a full-resolution evaluation can
+// resolve and a half-resolution one cannot. It is baked once per frame into a
+// half-size RGBA target under BG_PASS and sampled back bilinearly.
+//
+// .rgb is the water column. .a is the additive light (shafts + sun well),
+// kept separate because it is composited AFTER the floor and the creatures --
+// folding it into .rgb would put the light behind the sand instead of through
+// it. Both shafts and well are uLight * scalar, so one channel carries both.
+
+vec4 background(vec2 uv, vec2 p, float depth, vec2 sun, float t) {
+    float grad = smoothstep(0.0, 1.0, depth * depth * 0.6 + depth * 0.4);
+    vec3 col = mix(uShallow, uDeep, grad);
+    col *= 1.0 + 0.05 * (fbm3c(vec2(uv.x * 2.2, uv.y * 2.2 - t * 0.02)) - 0.5);
+    // Big, slow masses of water. Almost too subtle to name, but without them
+    // the column is a flat fill and the scene has no middle distance.
+    float body = fbm(vec2(p.x * 0.55 - t * 0.006, uv.y * 1.15 + t * 0.004));
+    col *= 0.91 + 0.19 * body;
+    // Water brightens towards the sun and falls into shadow away from it.
+    float sunAmt = exp(-length((p - sun) * vec2(0.55, 0.75)) * 1.1);
+    col = mix(col, uShallow * 1.05, sunAmt * 0.30 * (1.0 - grad * 0.5));
+    col *= 1.0 - 0.11 * smoothstep(0.5, 2.3, length(p - sun));
+
+    // Shafts of light. Below uv.y 0.08 the falloff has already taken the
+    // contribution to roughly a thousandth; three fbm octaves are not worth it.
+    float add = 0.0;
+    if (uv.y > 0.08) add = rays(p, sun, uv.y, t) * 0.22;
+    // A soft bloom where the sun sits behind the surface: a tight core and a
+    // wide halo, both squashed vertically so it reads as light spreading along
+    // the surface rather than a bulb in the water.
+    vec2 sd = p - sun;
+    sd.y *= 1.5;
+    add += exp(-dot(sd, sd) * 4.5) * 0.34 + exp(-length(sd) * 2.1) * 0.12;
+
+    return vec4(col, add);
+}
+
+#ifdef BG_PASS
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / uRes;
+    float asp = uRes.x / uRes.y;
+    gl_FragColor = background(uv, vec2((uv.x - 0.5) * asp, uv.y - 0.5),
+                              1.0 - uv.y, vec2(uSun.x * asp, uSun.y), uTime);
+}
+
+#elif defined(RAY_LUT_PASS)
 
 void main() {
     float ang = (gl_FragCoord.x / uRes.x - 0.5) * 3.14159265;
@@ -567,17 +616,13 @@ void main() {
     vec2 sun = vec2(uSun.x * asp, uSun.y);
 
     // ---- water column ------------------------------------------------
+    // Fetched from the half-res background target rather than evaluated here;
+    // see background() above for what is in it and why that is safe.
+    vec4 bg = texture2D(uBG, uv);
+    vec3 col = bg.rgb;
+    // grad still steers the night grade, but it is one smoothstep -- cheaper
+    // to redo at full resolution than to spend a channel carrying it.
     float grad = smoothstep(0.0, 1.0, depth * depth * 0.6 + depth * 0.4);
-    vec3 col = mix(uShallow, uDeep, grad);
-    col *= 1.0 + 0.05 * (fbm3c(vec2(uv.x * 2.2, uv.y * 2.2 - t * 0.02)) - 0.5);
-    // Big, slow masses of water. Almost too subtle to name, but without them
-    // the column is a flat fill and the scene has no middle distance.
-    float body = fbm(vec2(p.x * 0.55 - t * 0.006, uv.y * 1.15 + t * 0.004));
-    col *= 0.91 + 0.19 * body;
-    // Water brightens towards the sun and falls into shadow away from it.
-    float sunAmt = exp(-length((p - sun) * vec2(0.55, 0.75)) * 1.1);
-    col = mix(col, uShallow * 1.05, sunAmt * 0.30 * (1.0 - grad * 0.5));
-    col *= 1.0 - 0.11 * smoothstep(0.5, 2.3, length(p - sun));
 
     // The caustic net only ever contributes near the surface, so the voronoi
     // is skipped below it. The weight ramps in, so there is no seam where the
@@ -679,20 +724,10 @@ void main() {
         col = mix(col, weedCol, weed * 0.9);
     }
 
-    // ---- shafts of light --------------------------------------------
-    // Below this the shaft falloff has already taken the contribution to
-    // roughly a thousandth; three fbm octaves are not worth it.
-    if (uv.y > 0.08) col += uLight * rays(p, sun, uv.y, t) * 0.22;
-
-    // ---- the sun well -----------------------------------------------
-    // A soft bloom where the sun sits behind the surface: a tight core and
-    // a wide halo, both squashed vertically so it reads as light spreading
-    // along the surface rather than a bulb in the water.
-    vec2 sd = p - sun;
-    sd.y *= 1.5;
-    float core = exp(-dot(sd, sd) * 4.5);
-    float halo = exp(-length(sd) * 2.1);
-    col += uLight * (core * 0.34 + halo * 0.12);
+    // ---- shafts of light, and the sun well ---------------------------
+    // Both were computed in background(); this is where they land, on top of
+    // the floor and the creatures rather than behind them.
+    col += uLight * bg.a;
 
     // ---- caustic net, only just under the surface --------------------
     col += uLight * caus * 0.035 * pow(uv.y, 11.0);
