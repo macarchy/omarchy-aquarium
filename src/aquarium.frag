@@ -218,14 +218,21 @@ vec2 anemones(vec2 uv, float t, float asp, float count) {
         vec2 h = uRockSeed[i].xy;
         float cx = h.x;
         float len = 0.055 + 0.025 * uRockSeed[i].w;
+        // How far a tentacle actually gets from the base. A tentacle runs to
+        // q.y = L <= len in its own rotated frame and is only ever 0.0163
+        // wide off that axis (0.0063 of stalk at its bulb, plus 0.010 of
+        // wobble), so the fan is bounded by hypot(len, 0.0163) = 1.043 len
+        // whichever way it is turned. The old 1.6 len admitted 2.35x the
+        // pixels, every one of them running seven tentacles to find nothing.
+        float aBound = len * 1.07;
         // The x-distance alone already fails the radius test out here; skip
         // before paying for the floor fbm that seats the anemone.
-        if (abs(uv.x - cx) * asp > len * 1.6) continue;
+        if (abs(uv.x - cx) * asp > aBound) continue;
         float rw = 0.022 + h.y * 0.032;
         float rh = rw * asp * (0.62 + 0.30 * uRockSeed[i].z);
         vec2 base = vec2(cx, floor_height(cx) - rh * 0.45 + rh * 0.86);
         vec2 rel = vec2((uv.x - base.x) * asp, uv.y - base.y);
-        if (dot(rel, rel) > (len * 1.6) * (len * 1.6)) continue;
+        if (dot(rel, rel) > aBound * aBound) continue;
         for (int j = 0; j < 7; j++) {
             float fj = float(j);
             // Fan of tentacles, each swaying on its own beat.
@@ -262,11 +269,14 @@ vec2 starfish(vec2 uv, float asp, float count) {
         float cx = 0.08 + 0.84 * h.x;
         float R = 0.019 + 0.011 * h.y;
         // The star reaches at most rr + 0.10 = 1.10 units from its centre, so
-        // beyond 1.15 in x alone the mask is zero: skip before the floor fbm.
-        if (abs(uv.x - cx) * asp >= R * 1.15) continue;
+        // beyond that in x alone the mask is zero: skip before the floor fbm.
+        if (abs(uv.x - cx) * asp >= R * 1.12) continue;
         float cy = floor_height(cx) - 0.030 - h.y * 0.025;
         vec2 q = vec2((uv.x - cx) * asp, uv.y - cy) / R;
-        if (dot(q, q) > 1.7) continue;
+        // Same 1.10 the x test above uses, squared. This read 1.7 -- a radius
+        // of 1.30 -- which let through 1.4x the pixels for no reason the
+        // function's own comment supports.
+        if (dot(q, q) > 1.21) continue;
         float th = atan(q.y, q.x);
         float rot = uStarSeed[i].z * 6.2831;
         float rr = 0.66 + 0.34 * cos(th * 5.0 + rot);
