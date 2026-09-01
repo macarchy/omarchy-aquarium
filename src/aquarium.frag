@@ -1,10 +1,23 @@
 // Underwater aquarium scene, drawn entirely in a fragment shader.
 // GLES2 / GLSL ES 1.00: constant loop bounds, no dynamic indexing, no textures.
 
-precision highp float;
+// Default mediump, highp where the SCENE depends on it.
+//
+// This shader was occupancy-bound at 111 GPRs and 896 of 1024 threads through
+// every other change in this pass: gating work, removing work and baking work
+// all left it there, because what it actually spends is register WIDTH. AGX
+// packs two 16-bit values per register and issues them at double rate.
+//
+// highp is kept for anything positional -- uv at 2560 px needs 4e-4 relative
+// precision and mediump only guarantees 1e-3 -- for the hash and noise
+// coordinates, whose large sin arguments decide where every creature IS, for
+// the floor LUT's 16-bit fixed point, and for uTime, which grows without
+// bound. Colours, masks and lighting stay mediump: the frame is 8 bits and one
+// LSB is 4e-3, well inside what mediump carries.
+precision mediump float;
 
-uniform vec2  uRes;        // buffer size in pixels
-uniform float uTime;       // seconds since start
+uniform highp vec2 uRes;        // buffer size in pixels
+uniform highp float uTime;       // seconds since start
 uniform vec3  uDeep;       // water colour at the floor
 uniform vec3  uShallow;    // water colour at the surface
 uniform vec3  uLight;      // sunlight tint (rays, caustics, shimmer)
@@ -15,33 +28,33 @@ uniform float uJellyCount; // 0..5 jellyfish
 uniform float uAnemCount;  // 0..4 anemones
 uniform float uStarCount;  // 0..4 starfish
 uniform float uTurtle;     // 0/1: the occasional passing turtle
-uniform vec2  uSun;        // sun anchor, p-space (x is pre-aspect, scaled here)
+uniform highp vec2 uSun;        // sun anchor, p-space (x is pre-aspect, scaled here)
 uniform float uDay;        // daylight factor: 0 night .. 1 full day
 
 // Per-entity seeds, computed once on the CPU (see seeds.c for why they are
 // not hashed here: the compiler folded these sins with the host libm, the
 // GPU's sin disagrees at large arguments, and which one you got depended on
 // the loop shape — layout roulette). Spatial noise still hashes at runtime.
-uniform vec4  uWeedSeed[20];   // h.x, h.y, broad hash
-uniform vec4  uFishSeed[16];   // h.x, h.y, lay, dir hash
-uniform float uFishWarm[16];
-uniform vec4  uBubSeed[14];    // h.x, h.y
-uniform vec4  uSchoolSeed[9];  // h.x, h.y
-uniform vec4  uRockSeed[5];    // h.x, h.y, height hash, anemone len hash
-uniform vec4  uStarSeed[4];    // h.x, h.y, rot hash
-uniform vec4  uJellySeed[5];   // h.x, h.y, lay
+uniform highp vec4 uWeedSeed[20];   // h.x, h.y, broad hash
+uniform highp vec4 uFishSeed[16];   // h.x, h.y, lay, dir hash
+uniform highp float uFishWarm[16];
+uniform highp vec4 uBubSeed[14];    // h.x, h.y
+uniform highp vec4 uSchoolSeed[9];  // h.x, h.y
+uniform highp vec4 uRockSeed[5];    // h.x, h.y, height hash, anemone len hash
+uniform highp vec4 uStarSeed[4];    // h.x, h.y, rot hash
+uniform highp vec4 uJellySeed[5];   // h.x, h.y, lay
 
 // Per-frame animation state, computed on the CPU (anim.c): the positions and
 // phases of everything that moves. Per pixel, the entity loops keep only
 // their bounding gates and the shading.
-uniform vec4  uFishPos[16];    // x, y, cos(tilt), sin(tilt)
-uniform vec4  uBubPos[14];     // x, y, rim fade
-uniform vec4  uBubGrp[4];      // column band (lo, hi) per sorted quad
-uniform vec4  uJellyPos[5];    // x, y, lifecycle, pulse
-uniform float uJellyPh[5];     // pulse phase, for the tentacle sway
-uniform vec2  uSchoolPos;      // school centre
-uniform vec4  uTurtleA;        // x, y, direction (0 = off screen), flap
-uniform vec4  uTurtleB;        // cos/sin of front and rear flipper sweep
+uniform highp vec4 uFishPos[16];    // x, y, cos(tilt), sin(tilt)
+uniform highp vec4 uBubPos[14];     // x, y, rim fade
+uniform highp vec4 uBubGrp[4];      // column band (lo, hi) per sorted quad
+uniform highp vec4 uJellyPos[5];    // x, y, lifecycle, pulse
+uniform highp float uJellyPh[5];     // pulse phase, for the tentacle sway
+uniform highp vec2 uSchoolPos;      // school centre
+uniform highp vec4 uTurtleA;        // x, y, direction (0 = off screen), flap
+uniform highp vec4 uTurtleB;        // cos/sin of front and rear flipper sweep
 
 // Substrate hues are fixed rather than derived from the theme: an accent
 // colour is free to be anything, and blue sand does not read as sand.
@@ -53,26 +66,26 @@ const vec3 ANEM_TIP = vec3(0.78, 0.52, 0.46);    // pale rose tentacle tips
 
 // ---------------------------------------------------------------- noise
 
-float hash11(float n) { return fract(sin(n * 127.1) * 43758.5453123); }
+highp float hash11(highp float n) { return fract(sin(n * 127.1) * 43758.5453123); }
 
-vec2 hash21(float n) {
+highp vec2 hash21(highp float n) {
     return fract(sin(vec2(n * 127.1, n * 311.7)) * 43758.5453123);
 }
 
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
+highp float noise(highp vec2 p) {
+    highp vec2 i = floor(p);
+    highp vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    float a = hash11(i.x + i.y * 57.0);
-    float b = hash11(i.x + 1.0 + i.y * 57.0);
-    float c = hash11(i.x + (i.y + 1.0) * 57.0);
-    float d = hash11(i.x + 1.0 + (i.y + 1.0) * 57.0);
+    highp float a = hash11(i.x + i.y * 57.0);
+    highp float b = hash11(i.x + 1.0 + i.y * 57.0);
+    highp float c = hash11(i.x + (i.y + 1.0) * 57.0);
+    highp float d = hash11(i.x + 1.0 + (i.y + 1.0) * 57.0);
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
+highp float fbm(highp vec2 p) {
+    highp float v = 0.0;
+    highp float a = 0.5;
     for (int i = 0; i < 4; i++) {
         v += a * noise(p);
         p *= 2.03;
@@ -84,13 +97,13 @@ float fbm(vec2 p) {
 // fbm whose first octave sits on an integer lattice row: fract(p.y) is 0
 // there, the second lattice pair is multiplied by exactly zero, and half the
 // first octave's hashes vanish. Bit-identical to fbm(vec2(x, row)).
-float fbm_row(float x, float row) {
-    float i = floor(x);
-    float f = fract(x);
+highp float fbm_row(highp float x, highp float row) {
+    highp float i = floor(x);
+    highp float f = fract(x);
     f = f * f * (3.0 - 2.0 * f);
-    float v = 0.5 * mix(hash11(i + row * 57.0), hash11(i + 1.0 + row * 57.0), f);
-    vec2 p = vec2(x, row) * 2.03;
-    float a = 0.25;
+    highp float v = 0.5 * mix(hash11(i + row * 57.0), hash11(i + 1.0 + row * 57.0), f);
+    highp vec2 p = vec2(x, row) * 2.03;
+    highp float a = 0.25;
     for (int o = 0; o < 3; o++) {
         v += a * noise(p);
         p *= 2.03;
@@ -101,9 +114,9 @@ float fbm_row(float x, float row) {
 
 // Three octaves plus the missing octave's mean: for fields whose fourth
 // octave lands under half an 8-bit step, provably invisible after dither.
-float fbm3c(vec2 p) {
-    float v = 0.03125;
-    float a = 0.5;
+highp float fbm3c(highp vec2 p) {
+    highp float v = 0.03125;
+    highp float a = 0.5;
     for (int i = 0; i < 3; i++) {
         v += a * noise(p);
         p *= 2.03;
@@ -116,19 +129,19 @@ float fbm3c(vec2 p) {
 
 // Voronoi cell edges, animated: the bright net that dances on a pool floor.
 // Domain-warped first, so the cells read as water rather than as stained glass.
-float caustics(vec2 p, float t) {
+highp float caustics(highp vec2 p, highp float t) {
     p += 0.55 * vec2(fbm(p * 0.45 + vec2(0.0, t * 0.05)),
                      fbm(p * 0.45 + vec2(5.2, t * 0.04 + 1.3)));
-    float best = 1e9;
-    float second = 1e9;
-    vec2 ip = floor(p);
-    vec2 fp = fract(p);
+    highp float best = 1e9;
+    highp float second = 1e9;
+    highp vec2 ip = floor(p);
+    highp vec2 fp = fract(p);
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
-            vec2 g = vec2(float(x), float(y));
-            vec2 o = hash21((ip.x + g.x) * 1.7 + (ip.y + g.y) * 113.3);
+            highp vec2 g = vec2(float(x), float(y));
+            highp vec2 o = hash21((ip.x + g.x) * 1.7 + (ip.y + g.y) * 113.3);
             o = 0.5 + 0.42 * sin(t * 0.9 + 6.2831 * o);
-            float d = length(g + o - fp);
+            highp float d = length(g + o - fp);
             if (d < best) { second = best; best = d; }
             else if (d < second) { second = d; }
         }
@@ -152,43 +165,43 @@ float caustics(vec2 p, float t) {
 // never leaves (-pi/2, pi/2) and the strip maps that range over its width.
 uniform sampler2D uRayLUT;
 
-float rays(vec2 p, vec2 sun, float uvy, float t) {
-    vec2 d = p - sun;
-    float r = length(d);
-    float ang = atan(d.x, -d.y);
-    float s = texture2D(uRayLUT, vec2(ang * 0.3183098862 + 0.5, 0.5)).r * 1.45;
+float rays(highp vec2 p, highp vec2 sun, highp float uvy, highp float t) {
+    highp vec2 d = p - sun;
+    highp float r = length(d);
+    highp float ang = atan(d.x, -d.y);
+    highp float s = texture2D(uRayLUT, vec2(ang * 0.3183098862 + 0.5, 0.5)).r * 1.45;
     // Between the beams s is exactly 0 and the modulation fbm is a dead factor.
     if (s <= 0.0) return 0.0;
     // Beams thin out with distance from the sun and die before the floor.
     // Reaches exactly zero at uvy 0.08 so the caller can skip below there
     // without leaving a step in the gradient.
-    float fade = smoothstep(0.08, 0.50, uvy) * exp(-r * 1.05);
+    highp float fade = smoothstep(0.08, 0.50, uvy) * exp(-r * 1.05);
     return s * fade * (0.75 + 0.25 * fbm(vec2(ang * 2.4, r * 1.1 - t * 0.04)));
 }
 
 // ------------------------------------------------------------- sea floor
 
-float floor_height(float x) {
+highp float floor_height(highp float x) {
     return 0.035 + 0.13 * fbm_row(x * 3.6 + 7.0, 3.0)
                  + 0.03 * fbm_row(x * 11.0 + 2.0, 9.0);
 }
 
 // Rounded boulders resting on the sand. Returns (mask, lit): lit is how
 // squarely the winning boulder's surface faces the sun, up and to the left.
-vec2 rocks(vec2 uv, float asp) {
+vec2 rocks(highp vec2 uv, highp float asp) {
     float m = 0.0;
     float lit = 0.5;
     //#unroll
     for (int i = 0; i < 5; i++) {
-        float fi = float(i);
-        vec2 h = uRockSeed[i].xy;
-        float cx = h.x;
-        float rw = 0.022 + h.y * 0.032;
+        highp float fi = float(i);
+        highp vec2 h = uRockSeed[i].xy;
+        highp float cx = h.x;
+        highp float rw = 0.022 + h.y * 0.032;
         // The wobbled radius never exceeds 1.16, so this far out in x the
         // mask is exactly zero: skip before the height fbm and the atans.
         if (abs(uv.x - cx) >= rw * 1.16) continue;
-        float rh = rw * asp * (0.62 + 0.30 * uRockSeed[i].z);
-        float cy = floor_height(cx) - rh * 0.45;
+        highp float rh = rw * asp * (0.62 + 0.30 * uRockSeed[i].z);
+        highp float cy = floor_height(cx) - rh * 0.45;
         vec2 d = vec2((uv.x - cx) / rw, (uv.y - cy) / rh);
         if (abs(d.y) >= 1.16) continue;
         float wob = 1.0 + 0.10 * sin(atan(d.y, d.x) * 3.0 + fi * 2.0)
@@ -208,33 +221,33 @@ vec2 rocks(vec2 uv, float asp) {
 // hashes so each one actually sits on its rock. Returns (mask, glow) where
 // glow runs 0 at the base to 1 at the tentacle tips.
 
-vec2 anemones(vec2 uv, float t, float asp, float count) {
+vec2 anemones(highp vec2 uv, highp float t, highp float asp, float count) {
     float m = 0.0;
     float glow = 0.0;
     //#unroll
     for (int i = 0; i < 4; i++) {
-        float fi = float(i);
+        highp float fi = float(i);
         if (fi + 0.5 > count) continue;
-        vec2 h = uRockSeed[i].xy;
-        float cx = h.x;
-        float len = 0.055 + 0.025 * uRockSeed[i].w;
+        highp vec2 h = uRockSeed[i].xy;
+        highp float cx = h.x;
+        highp float len = 0.055 + 0.025 * uRockSeed[i].w;
         // How far a tentacle actually gets from the base. A tentacle runs to
         // q.y = L <= len in its own rotated frame and is only ever 0.0163
         // wide off that axis (0.0063 of stalk at its bulb, plus 0.010 of
         // wobble), so the fan is bounded by hypot(len, 0.0163) = 1.043 len
         // whichever way it is turned. The old 1.6 len admitted 2.35x the
         // pixels, every one of them running seven tentacles to find nothing.
-        float aBound = len * 1.07;
+        highp float aBound = len * 1.07;
         // The x-distance alone already fails the radius test out here; skip
         // before paying for the floor fbm that seats the anemone.
         if (abs(uv.x - cx) * asp > aBound) continue;
-        float rw = 0.022 + h.y * 0.032;
-        float rh = rw * asp * (0.62 + 0.30 * uRockSeed[i].z);
-        vec2 base = vec2(cx, floor_height(cx) - rh * 0.45 + rh * 0.86);
+        highp float rw = 0.022 + h.y * 0.032;
+        highp float rh = rw * asp * (0.62 + 0.30 * uRockSeed[i].z);
+        highp vec2 base = vec2(cx, floor_height(cx) - rh * 0.45 + rh * 0.86);
         vec2 rel = vec2((uv.x - base.x) * asp, uv.y - base.y);
         if (dot(rel, rel) > aBound * aBound) continue;
         for (int j = 0; j < 7; j++) {
-            float fj = float(j);
+            highp float fj = float(j);
             // Fan of tentacles, each swaying on its own beat.
             float a = (fj - 3.0) * 0.30
                     + 0.16 * sin(t * 0.7 + fi * 2.3 + fj * 1.9);
@@ -258,27 +271,27 @@ vec2 anemones(vec2 uv, float t, float asp, float count) {
 //
 // Still accents resting on the sand face. Returns (mask, arm ridge).
 
-vec2 starfish(vec2 uv, float asp, float count) {
+vec2 starfish(highp vec2 uv, highp float asp, float count) {
     float m = 0.0;
     float ridge = 0.5;
     //#unroll
     for (int i = 0; i < 4; i++) {
-        float fi = float(i);
+        highp float fi = float(i);
         if (fi + 0.5 > count) continue;
-        vec2 h = uStarSeed[i].xy;
-        float cx = 0.08 + 0.84 * h.x;
-        float R = 0.019 + 0.011 * h.y;
+        highp vec2 h = uStarSeed[i].xy;
+        highp float cx = 0.08 + 0.84 * h.x;
+        highp float R = 0.019 + 0.011 * h.y;
         // The star reaches at most rr + 0.10 = 1.10 units from its centre, so
         // beyond that in x alone the mask is zero: skip before the floor fbm.
         if (abs(uv.x - cx) * asp >= R * 1.12) continue;
-        float cy = floor_height(cx) - 0.030 - h.y * 0.025;
+        highp float cy = floor_height(cx) - 0.030 - h.y * 0.025;
         vec2 q = vec2((uv.x - cx) * asp, uv.y - cy) / R;
         // Same 1.10 the x test above uses, squared. This read 1.7 -- a radius
         // of 1.30 -- which let through 1.4x the pixels for no reason the
         // function's own comment supports.
         if (dot(q, q) > 1.21) continue;
         float th = atan(q.y, q.x);
-        float rot = uStarSeed[i].z * 6.2831;
+        highp float rot = uStarSeed[i].z * 6.2831;
         float rr = 0.66 + 0.34 * cos(th * 5.0 + rot);
         float a = smoothstep(0.10, -0.10, length(q) - rr);
         if (a > m) {
@@ -295,7 +308,7 @@ vec2 starfish(vec2 uv, float asp, float count) {
 // Groves, not a lawn: every blade belongs to one of three clumps, rooted
 // where the boulders sit, and a few blades in each clump are broad kelp
 // ribbons with lobed edges rather than grass.
-float seaweed(vec2 uv, float t, float asp, float count) {
+float seaweed(highp vec2 uv, highp float t, highp float asp, float count) {
     float m = 0.0;
     // How far a blade can reach from its root. The old bound added the
     // maxima of sway and of width, but those never happen together: sway
@@ -310,7 +323,7 @@ float seaweed(vec2 uv, float t, float asp, float count) {
     // term is the tip regime, sway-dominated and aspect-free; the second is
     // the k~0.5 regime, where width dominates and grows as 1/asp -- which is
     // why a portrait output still needs the wider bound.
-    float wbound = max(0.0585, 0.004 + 0.0520 / asp);
+    highp float wbound = max(0.0585, 0.004 + 0.0520 / asp);
     // Blades belong to one of three groves and can never reach further than
     // the grove's jitter plus a blade's own reach; a pixel outside the band
     // skips that grove's blades wholesale. Blade indices stay fi = 3k + g,
@@ -318,18 +331,18 @@ float seaweed(vec2 uv, float t, float asp, float count) {
     if (abs(uv.x - 0.15) < 0.08 + wbound) {
         //#unroll
         for (int i = 0; i < 7; i++) {
-            float fi = float(i) * 3.0 + 0.0;
+            highp float fi = float(i) * 3.0 + 0.0;
             if (fi + 0.5 > count) continue;
-            vec2 h = uWeedSeed[i * 3 + 0].xy;
-            float base = 0.15 + (h.x - 0.5) * 0.16;
+            highp vec2 h = uWeedSeed[i * 3 + 0].xy;
+            highp float base = 0.15 + (h.x - 0.5) * 0.16;
             if (abs(uv.x - base) >= wbound) continue;
             // Rooted well below the local crest: the dune wanders under a
             // swaying blade, and a root at the crest leaves the blade hanging
             // in open water on a hard cut wherever the sand dips.
-            float root = floor_height(base) - 0.07;
-            float broad = step(0.72, uWeedSeed[i * 3 + 0].z);
-            float hgt = 0.11 + h.y * 0.34 + broad * 0.10;
-            float top = root + hgt;
+            highp float root = floor_height(base) - 0.07;
+            highp float broad = step(0.72, uWeedSeed[i * 3 + 0].z);
+            highp float hgt = 0.11 + h.y * 0.34 + broad * 0.10;
+            highp float top = root + hgt;
             if (uv.y > root && uv.y < top) {
                 float k = (uv.y - root) / hgt;
                 float sway = (sin(uv.y * 6.0 + t * 0.55 + fi * 2.1) * 0.026 +
@@ -353,18 +366,18 @@ float seaweed(vec2 uv, float t, float asp, float count) {
     if (abs(uv.x - 0.54) < 0.08 + wbound) {
         //#unroll
         for (int i = 0; i < 7; i++) {
-            float fi = float(i) * 3.0 + 1.0;
+            highp float fi = float(i) * 3.0 + 1.0;
             if (fi + 0.5 > count) continue;
-            vec2 h = uWeedSeed[i * 3 + 1].xy;
-            float base = 0.54 + (h.x - 0.5) * 0.16;
+            highp vec2 h = uWeedSeed[i * 3 + 1].xy;
+            highp float base = 0.54 + (h.x - 0.5) * 0.16;
             if (abs(uv.x - base) >= wbound) continue;
             // Rooted well below the local crest: the dune wanders under a
             // swaying blade, and a root at the crest leaves the blade hanging
             // in open water on a hard cut wherever the sand dips.
-            float root = floor_height(base) - 0.07;
-            float broad = step(0.72, uWeedSeed[i * 3 + 1].z);
-            float hgt = 0.11 + h.y * 0.34 + broad * 0.10;
-            float top = root + hgt;
+            highp float root = floor_height(base) - 0.07;
+            highp float broad = step(0.72, uWeedSeed[i * 3 + 1].z);
+            highp float hgt = 0.11 + h.y * 0.34 + broad * 0.10;
+            highp float top = root + hgt;
             if (uv.y > root && uv.y < top) {
                 float k = (uv.y - root) / hgt;
                 float sway = (sin(uv.y * 6.0 + t * 0.55 + fi * 2.1) * 0.026 +
@@ -388,18 +401,18 @@ float seaweed(vec2 uv, float t, float asp, float count) {
     if (abs(uv.x - 0.88) < 0.08 + wbound) {
         //#unroll
         for (int i = 0; i < 6; i++) {
-            float fi = float(i) * 3.0 + 2.0;
+            highp float fi = float(i) * 3.0 + 2.0;
             if (fi + 0.5 > count) continue;
-            vec2 h = uWeedSeed[i * 3 + 2].xy;
-            float base = 0.88 + (h.x - 0.5) * 0.16;
+            highp vec2 h = uWeedSeed[i * 3 + 2].xy;
+            highp float base = 0.88 + (h.x - 0.5) * 0.16;
             if (abs(uv.x - base) >= wbound) continue;
             // Rooted well below the local crest: the dune wanders under a
             // swaying blade, and a root at the crest leaves the blade hanging
             // in open water on a hard cut wherever the sand dips.
-            float root = floor_height(base) - 0.07;
-            float broad = step(0.72, uWeedSeed[i * 3 + 2].z);
-            float hgt = 0.11 + h.y * 0.34 + broad * 0.10;
-            float top = root + hgt;
+            highp float root = floor_height(base) - 0.07;
+            highp float broad = step(0.72, uWeedSeed[i * 3 + 2].z);
+            highp float hgt = 0.11 + h.y * 0.34 + broad * 0.10;
+            highp float top = root + hgt;
             if (uv.y > root && uv.y < top) {
                 float k = (uv.y - root) / hgt;
                 float sway = (sin(uv.y * 6.0 + t * 0.55 + fi * 2.1) * 0.026 +
@@ -425,7 +438,7 @@ float seaweed(vec2 uv, float t, float asp, float count) {
 
 // --------------------------------------------------------------- bubbles
 
-float bubbles(vec2 uv, float t, float asp) {
+float bubbles(highp vec2 uv, highp float t, highp float asp) {
     float b = 0.0;
     // Seeds are sorted by column; each quad of neighbours shares one
     // column-band gate, so most pixels test four bands and stop.
@@ -490,11 +503,11 @@ float bubbles(vec2 uv, float t, float asp) {
 
 // ----------------------------------------------------------- marine snow
 
-float snow(vec2 uv, float t, float asp) {
-    vec2 g = vec2(uv.x * asp, uv.y) * 15.0;
+float snow(highp vec2 uv, highp float t, highp float asp) {
+    highp vec2 g = vec2(uv.x * asp, uv.y) * 15.0;
     g.y += t * 0.05;
     g.x += sin(t * 0.1 + g.y * 0.5) * 0.1;
-    vec2 id = floor(g);
+    highp vec2 id = floor(g);
     vec2 f = fract(g);
     vec2 o = hash21(id.x + id.y * 57.0);
     float d = length(f - o);
@@ -506,7 +519,7 @@ float snow(vec2 uv, float t, float asp) {
 // Local space: fish faces +x, nose near x = 0.55, tail tip near x = -1.0.
 // Returns (body distance, tail/fin distance) so the two can be shaded apart.
 
-vec2 fish_sdf(vec2 p, float wag) {
+vec2 fish_sdf(highp vec2 p, highp float wag) {
     // Whole body undulates, tail end swinging most.
     float bend = smoothstep(0.55, -1.0, p.x);
     p.y += sin(p.x * 2.6 - wag) * 0.13 * bend;
@@ -559,27 +572,27 @@ const float LUT_DEC = 0.25 / 65535.0;
 // folding it into .rgb would put the light behind the sand instead of through
 // it. Both shafts and well are uLight * scalar, so one channel carries both.
 
-vec4 background(vec2 uv, vec2 p, float depth, vec2 sun, float t) {
-    float grad = smoothstep(0.0, 1.0, depth * depth * 0.6 + depth * 0.4);
-    vec3 col = mix(uShallow, uDeep, grad);
+vec4 background(highp vec2 uv, highp vec2 p, highp float depth, highp vec2 sun, highp float t) {
+    highp float grad = smoothstep(0.0, 1.0, depth * depth * 0.6 + depth * 0.4);
+    highp vec3 col = mix(uShallow, uDeep, grad);
     col *= 1.0 + 0.05 * (fbm3c(vec2(uv.x * 2.2, uv.y * 2.2 - t * 0.02)) - 0.5);
     // Big, slow masses of water. Almost too subtle to name, but without them
     // the column is a flat fill and the scene has no middle distance.
-    float body = fbm(vec2(p.x * 0.55 - t * 0.006, uv.y * 1.15 + t * 0.004));
+    highp float body = fbm(vec2(p.x * 0.55 - t * 0.006, uv.y * 1.15 + t * 0.004));
     col *= 0.91 + 0.19 * body;
     // Water brightens towards the sun and falls into shadow away from it.
-    float sunAmt = exp(-length((p - sun) * vec2(0.55, 0.75)) * 1.1);
+    highp float sunAmt = exp(-length((p - sun) * vec2(0.55, 0.75)) * 1.1);
     col = mix(col, uShallow * 1.05, sunAmt * 0.30 * (1.0 - grad * 0.5));
     col *= 1.0 - 0.11 * smoothstep(0.5, 2.3, length(p - sun));
 
     // Shafts of light. Below uv.y 0.08 the falloff has already taken the
     // contribution to roughly a thousandth; three fbm octaves are not worth it.
-    float add = 0.0;
+    highp float add = 0.0;
     if (uv.y > 0.08) add = rays(p, sun, uv.y, t) * 0.22;
     // A soft bloom where the sun sits behind the surface: a tight core and a
     // wide halo, both squashed vertically so it reads as light spreading along
     // the surface rather than a bulb in the water.
-    vec2 sd = p - sun;
+    highp vec2 sd = p - sun;
     sd.y *= 1.5;
     add += exp(-dot(sd, sd) * 4.5) * 0.34 + exp(-length(sd) * 2.1) * 0.12;
 
@@ -589,8 +602,8 @@ vec4 background(vec2 uv, vec2 p, float depth, vec2 sun, float t) {
 #ifdef BG_PASS
 
 void main() {
-    vec2 uv = gl_FragCoord.xy / uRes;
-    float asp = uRes.x / uRes.y;
+    highp vec2 uv = gl_FragCoord.xy / uRes;
+    highp float asp = uRes.x / uRes.y;
     gl_FragColor = background(uv, vec2((uv.x - 0.5) * asp, uv.y - 0.5),
                               1.0 - uv.y, vec2(uSun.x * asp, uSun.y), uTime);
 }
@@ -598,7 +611,7 @@ void main() {
 #elif defined(RAY_LUT_PASS)
 
 void main() {
-    float ang = (gl_FragCoord.x / uRes.x - 0.5) * 3.14159265;
+    highp float ang = (gl_FragCoord.x / uRes.x - 0.5) * 3.14159265;
     float a = fbm_row(ang * 4.6 + uTime * 0.026, 11.0);
     float b = fbm_row(ang * 11.0 - uTime * 0.019, 41.0);
     float s = smoothstep(0.46, 0.95, a) + 0.45 * smoothstep(0.55, 0.95, b);
@@ -607,14 +620,14 @@ void main() {
 
 #elif defined(FLOOR_LUT_PASS)
 
-vec2 lut_enc(float v01) {
+highp vec2 lut_enc(highp float v01) {
     float q = floor(clamp(v01, 0.0, 1.0) * 65535.0 + 0.5);
     float hi = floor(q / 256.0);
     return vec2(hi, q - hi * 256.0) / 255.0;
 }
 
 void main() {
-    float x = gl_FragCoord.x / uRes.x;
+    highp float x = gl_FragCoord.x / uRes.x;
     float fh = floor_height(x);
     float slope = floor_height(x + 0.01) - floor_height(x - 0.01);
     gl_FragColor = vec4(lut_enc(fh * 4.0), lut_enc((slope + 0.125) * 4.0));
@@ -625,18 +638,18 @@ void main() {
 // ------------------------------------------------------------------ main
 
 void main() {
-    vec2 fc = gl_FragCoord.xy;
-    vec2 uv = fc / uRes;                       // 0..1, y up (1 = surface)
-    float asp = uRes.x / uRes.y;
-    vec2 p = vec2((uv.x - 0.5) * asp, uv.y - 0.5);
-    float t = uTime;
-    float depth = 1.0 - uv.y;                  // 0 surface .. 1 floor
+    highp vec2 fc = gl_FragCoord.xy;
+    highp vec2 uv = fc / uRes;                       // 0..1, y up (1 = surface)
+    highp float asp = uRes.x / uRes.y;
+    highp vec2 p = vec2((uv.x - 0.5) * asp, uv.y - 0.5);
+    highp float t = uTime;
+    highp float depth = 1.0 - uv.y;                  // 0 surface .. 1 floor
 
     // The sun: just above the surface. Everything bright in the scene — rays,
     // glow, caustic weighting — hangs off this point. Its position tracks the
     // real sun over the day (east left, west right, height from elevation);
     // at night the same anchor carries the moon.
-    vec2 sun = vec2(uSun.x * asp, uSun.y);
+    highp vec2 sun = vec2(uSun.x * asp, uSun.y);
 
     // ---- water column ------------------------------------------------
     // Fetched from the half-res background target rather than evaluated here;
