@@ -79,7 +79,7 @@ minima — the minimum, because the tail is all governor.
 
 ## 5. What a harness that survives all four looks like
 
-The three traps above eliminate most of what a benchmark could be. What is left,
+The four traps above eliminate most of what a benchmark could be. What is left,
 in this project, is `bench/eval.py`:
 
     git worktree add ../omarchy-aquarium-ref <baseline-commit>
@@ -87,11 +87,13 @@ in this project, is `bench/eval.py`:
     python3 bench/eval.py --record        # golden frames, once
     python3 bench/eval.py --split dev     # score a change
 
-It renders ten golden frames and gates correctness on the **99.9th percentile**
-of the per-channel delta rather than the mean. The mean cannot do this job:
-dropping three of five jellyfish moves it by **0.22 of 255** and sails past any
-mean threshold anyone would set, while spiking p999 to **29**. Then it benches
-candidate against reference alternately and scores the ratio of the minima.
+It renders ten golden frames and gates correctness on two numbers at once: the
+mean per-channel delta (at most **1.20** of 255) and its **99.9th percentile**
+(at most **12**). The percentile is the half that catches a deleted entity —
+the mean cannot do that job alone, because dropping three of five jellyfish
+moves it by **0.22 of 255** and sails past any mean threshold anyone would set,
+while spiking p999 to **29**. Then it benches candidate against reference
+alternately and scores the ratio of the minima.
 `--split test` is a held-out half, kept for the final check so that a long
 optimisation campaign cannot quietly overfit the metric.
 

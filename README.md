@@ -74,7 +74,10 @@ for both:
 
 - **Suspending behind a fullscreen window** needs the event socket. Elsewhere
   the renderer prints `no Hyprland event socket, drawing unconditionally` and
-  keeps drawing; `--fps` and `--battery-fps` are then the only throttles.
+  keeps drawing. `--fps` and `--battery-fps` still apply, and so does the
+  built-in frame-rate governor, which needs no compositor at all: when a run at
+  the display's own rate delivers under 75% of it for fifteen seconds, the
+  governor locks the exact half rate and retries two minutes later.
 - **The cursor-shy fish** need the cursor position from the same place. Without
   it reactivity is switched off, which also means the `startle` control pipe is
   not created and `omarchy-aquarium-notify` has nothing to poke.
@@ -175,7 +178,7 @@ At the native 2560x1600 buffer on an M2 (Asahi, Mesa) the full scene renders in
 **~9.7 ms/frame with the GPU saturated**, and more slowly at the low clocks the
 firmware grants a light duty cycle.
 
-Two traps, both of which have cost real time here:
+Three traps, all of which have cost real time here:
 
 **Do not benchmark with back-to-back draws into one framebuffer.** Apple GPUs
 hidden-surface-remove every opaque draw but the last, and that bench reports a
@@ -207,12 +210,13 @@ in one session. Only an A/B taken minutes apart means anything, which is what
     python3 bench/eval.py --record        # golden frames, once
     python3 bench/eval.py --split dev     # score a change
 
-It renders ten golden frames and gates on the 99.9th percentile of the
-per-channel delta rather than the mean -- dropping three of five jellyfish
-moves the mean by 0.22 of 255 and sails past any mean threshold, but spikes
-p999 to 29 -- then benches candidate against reference alternately and scores
-the ratio of the minima. `--split test` is the held-out half; keep it for the
-final check.
+It renders ten golden frames and gates on both the mean per-channel delta
+(at most 1.20 of 255) and its 99.9th percentile (at most 12). The percentile is
+the half that catches a deleted entity: dropping three of five jellyfish moves
+the mean by 0.22 of 255 and would sail past any mean threshold on its own, but
+spikes p999 to 29. It then benches candidate against reference alternately and
+scores the ratio of the minima. `--split test` is the held-out half; keep it
+for the final check.
 
 What keeps the cost down:
 
