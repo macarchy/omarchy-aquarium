@@ -79,7 +79,8 @@ build/omarchy-aquarium: $(OBJ)
 
 # Regenerate the demo clip in docs/media straight from the offscreen renderer,
 # so what the README shows can never drift from the shader it claims to show.
-# 200 frames at t = 40 .. 48 s, themed like the desktop it was shot on.
+# 200 frames at t = 40 .. 48 s, in the default palette: what a stranger with
+# no theme file installed will actually see.
 # Needs ffmpeg.
 DEMO_FRAMES := build/demo-frames
 
@@ -90,7 +91,7 @@ demo: preview
 	@echo "rendering 200 frames into $(DEMO_FRAMES)"
 	@for i in $$(seq 0 199); do \
 		t=$$(awk "BEGIN{printf \"%.4f\", 40 + $$i/25.0}"); \
-		./build/aquarium-preview --width 1280 --height 800 --time $$t --theme \
+		./build/aquarium-preview --width 1280 --height 800 --time $$t \
 			--out $(DEMO_FRAMES)/f$$(printf %04d $$i).ppm || exit 1; \
 	done
 	ffmpeg -y -framerate 25 -i $(DEMO_FRAMES)/f%04d.ppm -c:v libx264 -pix_fmt yuv420p \
