@@ -77,6 +77,16 @@ the water hue from it, while sand, stone and fish keep fixed hues — an accent
 colour is allowed to be anything, and blue sand does not read as sand. An
 installed `theme-set` hook restarts the aquarium when the theme changes.
 
+### Hooks
+
+Executables in `~/.config/omarchy-aquarium/hooks/` run whenever the tank goes on
+or off, detached, with `on` or `off` as their argument. Turning it on or off
+repaints the whole screen and nothing else can tell that happened — on a desktop
+whose bar picks its text colour by sampling the screen, that is the difference
+between white text over the water and black text over the water until some timer
+notices. An internal restart (the theme hook) is not a state change and fires
+nothing.
+
 ## Reactivity
 
 The tank notices the desktop, and all of it is CPU-side — the shader gets the
@@ -207,6 +217,8 @@ how the scene was tuned:
 
     ./build/aquarium-preview --time 33 --theme --out frame.ppm
     ./build/aquarium-preview --bench 200 --pipe --out /dev/null
+
+    bash tests/test_toggle.sh    # the toggle's state, restore and hooks
 
 Editing `src/aquarium.frag` and rerunning `make` is the whole iteration loop;
 `--shader src/aquarium.frag` skips the rebuild.
