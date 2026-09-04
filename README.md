@@ -7,6 +7,22 @@ scene graph.
 
 ![the scene](docs/preview.png)
 
+## Install
+
+    git clone https://github.com/macarchy/omarchy-aquarium
+    cd omarchy-aquarium
+    ./install.sh
+
+That builds the renderer into `~/.local/bin` and wires it into Omarchy: the
+**SUPER + ALT + A** toggle, a login line that puts the tank back the way you
+left it, and the `theme-set` hook that re-reads your colours. It writes into
+`~/.config/hypr/bindings.lua` and `autostart.lua` on Omarchy 4, or into your
+hyprlang config on earlier versions, fenced by markers and appended only once —
+re-run it to update. `./install.sh --uninstall` takes all of it back out.
+
+`make install` alone only places the three binaries; it wires nothing, so
+SUPER + ALT + A will not exist.
+
 ## How it sits on the desktop
 
 The renderer opens one `wlr-layer-shell` surface per output on the **bottom**
@@ -183,7 +199,7 @@ bounding test before its real math.
 ## Building
 
     make            # build/omarchy-aquarium
-    make install    # into ~/.local/bin
+    make install    # binaries into ~/.local/bin, nothing wired (see Install)
     make preview    # build/aquarium-preview, the offscreen renderer
 
 `aquarium-preview` renders single frames without touching the desktop, which is
