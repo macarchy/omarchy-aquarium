@@ -21,6 +21,15 @@ The surface takes an empty input region, so clicks and touches pass through it.
 
     omarchy-aquarium-toggle          # on/off  (bound to SUPER + ALT + A)
     omarchy-aquarium-toggle status
+    omarchy-aquarium-toggle restore  # at login: back to how you left it
+    omarchy-aquarium-toggle restart  # re-read the theme, keep on/off
+
+On and off are remembered in `~/.local/state/omarchy-aquarium/enabled`, so a
+session autostart can run `restore` and get the tank the user last chose —
+started when the state is unwritten, left alone when they turned it off. Wire
+it in `~/.config/hypr/autostart.lua`:
+
+    o.exec_on_start("omarchy-aquarium-toggle restore")
 
 Renderer flags:
 
