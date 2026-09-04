@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/macarchy/omarchy-aquarium/compare/v0.2.0...v0.2.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **toggle:** tell the desktop when the tank goes on or off ([#6](https://github.com/macarchy/omarchy-aquarium/issues/6)) ([e1799bb](https://github.com/macarchy/omarchy-aquarium/commit/e1799bb76fa6d613f29b848f89237d5e6dfdb5bc))
+
 ## [0.2.0](https://github.com/macarchy/omarchy-aquarium/compare/v0.1.0...v0.2.0) (2026-09-04)
 
 
