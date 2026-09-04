@@ -1,7 +1,11 @@
 #!/bin/bash
 # Turn the animated aquarium background on or off.
 #
-#   omarchy-aquarium-toggle [toggle|on|off|status|startle]
+#   omarchy-aquarium-toggle [toggle|on|off|status|restore|restart|startle]
+#
+# "restore" is what a session autostart calls: it starts the tank unless it was
+# deliberately turned off in an earlier session (the on/off state outlives a
+# reboot; an unwritten state means on).
 #
 # Extra flags for the renderer can be put, one per line or space separated, in
 #   ~/.config/omarchy-aquarium/options
@@ -18,8 +22,19 @@ NOTIFY_PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium-notify.pid"
 LOGFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.log"
 CTLFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.ctl"
 OPTIONS_FILE="$HOME/.config/omarchy-aquarium/options"
+STATEFILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-aquarium/enabled"
 
 DEFAULT_ARGS=(--theme --fps 60)
+
+# Remember on/off across sessions, so a login can put the tank back exactly as
+# it was left. A failure to write it must never break the toggle itself.
+remember() {
+	# A restart on the machine's behalf (the theme hook) is not the user
+	# saying "off", so it leaves the remembered state alone.
+	[[ ${KEEP_STATE:-0} == 1 ]] && return 0
+	mkdir -p "${STATEFILE%/*}" 2>/dev/null && printf '%s\n' "$1" >"$STATEFILE" 2>/dev/null
+	return 0
+}
 
 notify() {
 	command -v notify-send >/dev/null || return 0
@@ -37,6 +52,7 @@ running_pid() {
 }
 
 start() {
+	remember on
 	if running_pid >/dev/null; then
 		return 0
 	fi
@@ -56,6 +72,7 @@ start() {
 }
 
 stop() {
+	remember off
 	if [[ -r $NOTIFY_PIDFILE ]]; then
 		# The pid is the script; the dbus-monitor it spawned shares its
 		# session (setsid), so take down the whole group.
@@ -72,7 +89,22 @@ stop() {
 case "${1:-toggle}" in
 	on)     start ;;
 	off)    stop ;;
+	restore)
+		# At login: no notification (the tank has not "just been turned on",
+		# and a bubble at boot would startle it in its first second).
+		[[ $(cat "$STATEFILE" 2>/dev/null) == off ]] && exit 0
+		notify() { :; }
+		start
+		;;
 	toggle) if running_pid >/dev/null; then stop; else start; fi ;;
+	restart)
+		# For hooks: pick up new colours without changing on/off.
+		running_pid >/dev/null || exit 0
+		KEEP_STATE=1
+		notify() { :; }
+		stop
+		start
+		;;
 	status)
 		if pid=$(running_pid); then
 			echo "running (pid $pid)"
@@ -85,7 +117,7 @@ case "${1:-toggle}" in
 		[[ -p $CTLFILE ]] && timeout 0.5 bash -c "printf 'startle\n' > '$CTLFILE'"
 		;;
 	*)
-		echo "usage: ${0##*/} [toggle|on|off|status|startle]" >&2
+		echo "usage: ${0##*/} [toggle|on|off|status|restore|restart|startle]" >&2
 		exit 2
 		;;
 esac
