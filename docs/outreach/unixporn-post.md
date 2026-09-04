@@ -35,11 +35,12 @@ Alternates, same rules (`[WM] short claim`, no marketing voice):
 r/unixporn wants the setup spelled out; post this as your own top-level comment
 right after submitting.
 
-> - **Distro:** Arch (Asahi), on an M2 MacBook Air
+> - **Distro:** Arch (Asahi), on a MacBook Pro (13-inch, M2)
 > - **WM:** Hyprland, via Omarchy
 > - **Background:** omarchy-aquarium — https://github.com/macarchy/omarchy-aquarium
 > - **Theme:** Apple Glass Light — https://github.com/macarchy/apple-glass-light
->   (the water is tinted from the theme's palette, so it follows the theme)
+>   (the clip is the default palette; `--theme` tints the water from your
+>   colours instead, so the tank follows whatever theme you run)
 > - **Terminal:** kitty
 >
 > It needs only `wlr-layer-shell` and GLES2, so it should run on Sway, river,

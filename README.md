@@ -8,9 +8,10 @@ shafts, caustics, sand, weed, boulders, bubbles and fish — is one fragment
 shader on GLES2; there is no video, no image, and no scene graph.
 
 The renderer asks nothing of the desktop beyond layer-shell and an EGL/GLES2
-driver, so it runs unchanged on wlroots-based compositors (Sway, river,
-Wayfire, labwc) and on others that implement the same protocol (Hyprland,
-niri). It is developed and tested on Hyprland, under Omarchy — and `install.sh`
+driver, so it should run unchanged on wlroots-based compositors (Sway,
+river, Wayfire, labwc) and on others that implement the same protocol
+(niri) — none of which anyone has tested yet. It is developed and tested
+on Hyprland, under Omarchy — and `install.sh`
 additionally wires it into Omarchy: the **SUPER + ALT + A** toggle, a login
 line that restores it, and a `theme-set` hook that re-reads your colours.
 Everything Omarchy adds is listed under [Without Omarchy](#without-omarchy).
@@ -45,8 +46,9 @@ On any other layer-shell compositor:
 
 Start it from whatever your compositor uses for autostart (`exec
 omarchy-aquarium` in a Sway config, for example) and stop it with a signal.
-`omarchy-aquarium-toggle` works there too — it only keeps a pidfile, a state
-file and its own `~/.config/omarchy-aquarium/options`, so bind it to a key
+`omarchy-aquarium-toggle` works there too — everything it keeps is its own
+(pidfiles, a state file, a log, the control FIFO and
+`~/.config/omarchy-aquarium/`), nothing Omarchy-specific, so bind it to a key
 yourself and `restore` still puts the tank back the way you left it.
 
 `./install.sh` is worth running only on Hyprland: it writes the keybind and the
@@ -75,7 +77,8 @@ for both:
 - **Suspending behind a fullscreen window** needs the event socket. Elsewhere
   the renderer prints `no Hyprland event socket, drawing unconditionally` and
   keeps drawing. `--fps` and `--battery-fps` still apply, and so does the
-  built-in frame-rate governor, which needs no compositor at all: when a run at
+  built-in frame-rate governor, which needs no Hyprland IPC — only the refresh
+  rate the compositor already advertises: when a run at
   the display's own rate delivers under 75% of it for fifteen seconds, the
   governor locks the exact half rate and retries two minutes later.
 - **The cursor-shy fish** need the cursor position from the same place. Without
@@ -212,9 +215,9 @@ in one session. Only an A/B taken minutes apart means anything, which is what
 
 It renders ten golden frames and gates on both the mean per-channel delta
 (at most 1.20 of 255) and its 99.9th percentile (at most 12). The percentile is
-the half that catches a deleted entity: dropping three of five jellyfish moves
-the mean by 0.22 of 255 and would sail past any mean threshold on its own, but
-spikes p999 to 29. It then benches candidate against reference alternately and
+the half that catches a deleted entity: dropping three of five jellyfish barely
+moves the mean and would sail past any mean threshold on its own, but spikes
+p999 to 29. It then benches candidate against reference alternately and
 scores the ratio of the minima. `--split test` is the held-out half; keep it
 for the final check.
 
@@ -289,8 +292,8 @@ Editing `src/aquarium.frag` and rerunning `make` is the whole iteration loop;
 
 `make demo` regenerates the clip at the top of this file from the shader as it
 is now, so it cannot quietly go on advertising a scene the code stopped
-drawing: 200 frames of `aquarium-preview` at 1280x800, `t` = 40 to 48 s with
-`--theme`, encoded by ffmpeg into the 8 s h.264 clip and a 6 s 640 px GIF. It
+drawing: 200 frames of `aquarium-preview` at 1280x800, `t` = 40 to 48 s in the
+default palette, encoded by ffmpeg into the 8 s h.264 clip and a 5 s 640 px GIF. It
 needs `ffmpeg` on the PATH and takes about a minute.
 
 Dependencies: `wayland-client`, `wayland-egl`, `egl`, `glesv2`,

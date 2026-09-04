@@ -96,8 +96,8 @@ demo: preview
 	done
 	ffmpeg -y -framerate 25 -i $(DEMO_FRAMES)/f%04d.ppm -c:v libx264 -pix_fmt yuv420p \
 		-crf 20 -movflags +faststart docs/media/aquarium.mp4
-	ffmpeg -y -framerate 25 -i $(DEMO_FRAMES)/f%04d.ppm -t 6 \
-		-vf "fps=16,scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" \
+	ffmpeg -y -framerate 25 -i $(DEMO_FRAMES)/f%04d.ppm -t 5 \
+		-vf "fps=16,scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=5" \
 		-loop 0 docs/media/aquarium.gif
 	@rm -rf $(DEMO_FRAMES)
 
