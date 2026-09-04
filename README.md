@@ -1,19 +1,31 @@
 # omarchy-aquarium
 
-An animated underwater scene as the desktop background on Hyprland/Omarchy.
-The whole aquarium — water, light shafts, caustics, sand, weed, boulders,
-bubbles and fish — is one fragment shader; there is no video, no image, and no
-scene graph.
+![the aquarium, moving](docs/media/aquarium.gif)
 
-![the scene](docs/preview.png)
+An animated underwater scene as the desktop background, on any Wayland
+compositor that speaks `wlr-layer-shell`. The whole aquarium — water, light
+shafts, caustics, sand, weed, boulders, bubbles and fish — is one fragment
+shader on GLES2; there is no video, no image, and no scene graph.
 
-## Install
+The renderer asks nothing of the desktop beyond layer-shell and an EGL/GLES2
+driver, so it should run unchanged on wlroots-based compositors (Sway,
+river, Wayfire, labwc) and on others that implement the same protocol
+(niri) — none of which anyone has tested yet. It is developed and tested
+on Hyprland, under Omarchy — and `install.sh`
+additionally wires it into Omarchy: the **SUPER + ALT + A** toggle, a login
+line that restores it, and a `theme-set` hook that re-reads your colours.
+Everything Omarchy adds is listed under [Without Omarchy](#without-omarchy).
+
+The clip above, longer and sharper: [8 s of 1280x800
+h.264](docs/media/aquarium.mp4). A single still: [docs/preview.png](docs/preview.png).
+
+## Install on Omarchy
 
     git clone https://github.com/macarchy/omarchy-aquarium
     cd omarchy-aquarium
     ./install.sh
 
-That builds the renderer into `~/.local/bin` and wires it into Omarchy: the
+That builds the renderer into `~/.local/bin` and wires up all three pieces: the
 **SUPER + ALT + A** toggle, a login line that puts the tank back the way you
 left it, and the `theme-set` hook that re-reads your colours. It writes into
 `~/.config/hypr/bindings.lua` and `autostart.lua` on Omarchy 4, or into your
@@ -22,6 +34,59 @@ re-run it to update. `./install.sh --uninstall` takes all of it back out.
 
 `make install` alone only places the three binaries; it wires nothing, so
 SUPER + ALT + A will not exist.
+
+## Without Omarchy
+
+Nothing in the renderer requires Omarchy, and nothing requires the installer.
+On any other layer-shell compositor:
+
+    make            # build/omarchy-aquarium
+    make install    # the three binaries into ~/.local/bin (PREFIX=… to move them)
+    omarchy-aquarium --fps 60
+
+Start it from whatever your compositor uses for autostart (`exec
+omarchy-aquarium` in a Sway config, for example) and stop it with a signal.
+`omarchy-aquarium-toggle` works there too — everything it keeps is its own
+(pidfiles, a state file, a log, the control FIFO and
+`~/.config/omarchy-aquarium/`), nothing Omarchy-specific, so bind it to a key
+yourself and `restore` still puts the tank back the way you left it.
+
+`./install.sh` is worth running only on Hyprland: it writes the keybind and the
+login line into `~/.config/hypr/`, skips the theme hook when there is no
+`~/.config/omarchy`, and on anything else prints the lines it could not wire
+and exits with a warning. `make install` is the quieter path.
+
+What is Omarchy-specific:
+
+- **`--theme`** reads `~/.local/state/omarchy/current/theme/colors.toml` and
+  steers the water hue from it. Without that file it says so on stderr and
+  keeps the curated default palette — the flag is safe to leave on.
+- **The solar sun position** takes latitude and longitude from
+  `~/.config/omarchy/dynamic-wallpaper.json`, the same file Omarchy's wallpaper
+  rotation uses. Without it the sun stays at the tuned afternoon anchor and the
+  jellyfish never go night-time bioluminescent; `--sun X,Y` pins the anchor by
+  hand.
+- **The `theme-set` hook** (`hooks/aquarium-theme`) is installed into
+  `~/.config/omarchy/hooks/theme-set.d/` and exists only to restart the
+  renderer when an Omarchy theme changes.
+
+What is Hyprland-specific rather than Omarchy-specific — the renderer reads
+Hyprland's IPC sockets at `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE`
+for both:
+
+- **Suspending behind a fullscreen window** needs the event socket. Elsewhere
+  the renderer prints `no Hyprland event socket, drawing unconditionally` and
+  keeps drawing. `--fps` and `--battery-fps` still apply, and so does the
+  built-in frame-rate governor, which needs no Hyprland IPC — only the refresh
+  rate the compositor already advertises: when a run at
+  the display's own rate delivers under 75% of it for fifteen seconds, the
+  governor locks the exact half rate and retries two minutes later.
+- **The cursor-shy fish** need the cursor position from the same place. Without
+  it reactivity is switched off, which also means the `startle` control pipe is
+  not created and `omarchy-aquarium-notify` has nothing to poke.
+
+Neither is needed to draw the scene; without them the tank simply stops
+noticing the desktop around it.
 
 ## How it sits on the desktop
 
@@ -116,7 +181,7 @@ At the native 2560x1600 buffer on an M2 (Asahi, Mesa) the full scene renders in
 **~9.7 ms/frame with the GPU saturated**, and more slowly at the low clocks the
 firmware grants a light duty cycle.
 
-Two traps, both of which have cost real time here:
+Three traps, all of which have cost real time here:
 
 **Do not benchmark with back-to-back draws into one framebuffer.** Apple GPUs
 hidden-surface-remove every opaque draw but the last, and that bench reports a
@@ -148,12 +213,13 @@ in one session. Only an A/B taken minutes apart means anything, which is what
     python3 bench/eval.py --record        # golden frames, once
     python3 bench/eval.py --split dev     # score a change
 
-It renders ten golden frames and gates on the 99.9th percentile of the
-per-channel delta rather than the mean -- dropping three of five jellyfish
-moves the mean by 0.22 of 255 and sails past any mean threshold, but spikes
-p999 to 29 -- then benches candidate against reference alternately and scores
-the ratio of the minima. `--split test` is the held-out half; keep it for the
-final check.
+It renders ten golden frames and gates on both the mean per-channel delta
+(at most 1.20 of 255) and its 99.9th percentile (at most 12). The percentile is
+the half that catches a deleted entity: dropping three of five jellyfish barely
+moves the mean and would sail past any mean threshold on its own, but spikes
+p999 to 29. It then benches candidate against reference alternately and
+scores the ratio of the minima. `--split test` is the held-out half; keep it
+for the final check.
 
 What keeps the cost down:
 
@@ -211,6 +277,7 @@ bounding test before its real math.
     make            # build/omarchy-aquarium
     make install    # binaries into ~/.local/bin, nothing wired (see Install)
     make preview    # build/aquarium-preview, the offscreen renderer
+    make demo       # re-render docs/media/aquarium.{gif,mp4}  (needs ffmpeg)
 
 `aquarium-preview` renders single frames without touching the desktop, which is
 how the scene was tuned:
@@ -222,6 +289,12 @@ how the scene was tuned:
 
 Editing `src/aquarium.frag` and rerunning `make` is the whole iteration loop;
 `--shader src/aquarium.frag` skips the rebuild.
+
+`make demo` regenerates the clip at the top of this file from the shader as it
+is now, so it cannot quietly go on advertising a scene the code stopped
+drawing: 200 frames of `aquarium-preview` at 1280x800, `t` = 40 to 48 s in the
+default palette, encoded by ffmpeg into the 8 s h.264 clip and a 5 s 640 px GIF. It
+needs `ffmpeg` on the PATH and takes about a minute.
 
 Dependencies: `wayland-client`, `wayland-egl`, `egl`, `glesv2`,
 `wayland-protocols` and `wayland-scanner`. The layer-shell protocol XML is
