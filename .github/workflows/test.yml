@@ -1,0 +1,31 @@
+name: tests
+
+# The toggle is the piece most likely to break quietly -- it decides what comes
+# back at login and who gets told when the tank changes -- and it is plain bash
+# with a stubbed renderer, so it runs anywhere. The renderer itself needs a GPU
+# and a compositor and is not built here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  toggle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/test_toggle.sh
+      - name: Shell syntax
+        run: |
+          for f in install.sh bin/* hooks/*; do
+            bash -n "$f"
+          done

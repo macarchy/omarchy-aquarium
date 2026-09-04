@@ -3,6 +3,10 @@
 #
 #   omarchy-aquarium-toggle [toggle|on|off|status|restore|restart|startle]
 #
+# Executables in ~/.config/omarchy-aquarium/hooks/ are run (detached, with "on"
+# or "off" as $1) whenever the tank goes on or off, for anything that has to
+# re-read the screen afterwards.
+#
 # "restore" is what a session autostart calls: it starts the tank unless it was
 # deliberately turned off in an earlier session (the on/off state outlives a
 # reboot; an unwritten state means on).
@@ -22,6 +26,7 @@ NOTIFY_PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium-notify.pid"
 LOGFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.log"
 CTLFILE="${XDG_RUNTIME_DIR:-/tmp}/omarchy-aquarium.ctl"
 OPTIONS_FILE="$HOME/.config/omarchy-aquarium/options"
+HOOK_DIR="$HOME/.config/omarchy-aquarium/hooks"
 STATEFILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-aquarium/enabled"
 
 DEFAULT_ARGS=(--theme --fps 60)
@@ -33,6 +38,25 @@ remember() {
 	# saying "off", so it leaves the remembered state alone.
 	[[ ${KEEP_STATE:-0} == 1 ]] && return 0
 	mkdir -p "${STATEFILE%/*}" 2>/dev/null && printf '%s\n' "$1" >"$STATEFILE" 2>/dev/null
+	return 0
+}
+
+# Turning the tank on or off repaints the whole screen, and anything that
+# reacts to what is on screen has no way to hear about it: the pid file sits in
+# the runtime dir and nothing watches it. On this machine that shows up as the
+# transparent bar keeping black text over blue water until its 5-minute timer
+# comes round. Hooks get the new state as $1 and run detached -- the keybind
+# must not wait for them.
+run_hooks() {
+	# An internal restart is not a state change; neither the state file nor
+	# the hooks should see one.
+	[[ ${KEEP_STATE:-0} == 1 ]] && return 0
+	[[ -d $HOOK_DIR ]] || return 0
+	local h
+	for h in "$HOOK_DIR"/*; do
+		[[ -f $h && -x $h ]] || continue
+		setsid "$h" "$1" >/dev/null 2>&1 &
+	done
 	return 0
 }
 
@@ -69,6 +93,7 @@ start() {
 		echo $! >"$NOTIFY_PIDFILE"
 	fi
 	notify "Aquarium on"
+	run_hooks on
 }
 
 stop() {
@@ -80,10 +105,11 @@ stop() {
 		rm -f "$NOTIFY_PIDFILE"
 	fi
 	local pid
-	pid=$(running_pid) || { rm -f "$PIDFILE"; return 0; }
+	pid=$(running_pid) || { rm -f "$PIDFILE"; run_hooks off; return 0; }
 	kill "$pid" 2>/dev/null
 	rm -f "$PIDFILE"
 	notify "Aquarium off"
+	run_hooks off
 }
 
 case "${1:-toggle}" in
