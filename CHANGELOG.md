@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/macarchy/omarchy-aquarium/compare/v0.2.1...v0.3.0) (2026-09-05)
+
+
+### Features
+
+* **pkg:** publish an aarch64 package on every release ([#10](https://github.com/macarchy/omarchy-aquarium/issues/10)) ([fae19e3](https://github.com/macarchy/omarchy-aquarium/commit/fae19e34f03e8ff62aa5c7a9dc099ebdf710c670))
+
 ## [0.2.1](https://github.com/macarchy/omarchy-aquarium/compare/v0.2.0...v0.2.1) (2026-09-04)
 
 
