@@ -1,0 +1,13 @@
+post_install() {
+  cat <<'NOTE'
+
+  omarchy-aquarium is installed. The theme hook belongs under $HOME, which pacman
+  may not write:
+
+    install -Dm755 /usr/share/omarchy-aquarium/hooks/aquarium-theme \
+      ~/.config/omarchy/hooks/theme-set.d/aquarium-theme
+
+  Start it with:  omarchy-aquarium-toggle
+
+NOTE
+}
