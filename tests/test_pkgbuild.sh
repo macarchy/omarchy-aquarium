@@ -42,6 +42,9 @@ check "pkgver is rewritten from the tag"    grep -q 'pkgver=\${TAG#v}' "$WF"
 check "extra-files is not used"             bash -c '! grep -q "extra-files" release-please-config.json'
 check "the upload globs"                    grep -q '\*.pkg.tar.\*' "$WF"
 check "gh is installed in the container"    grep -q 'github-cli' "$WF"
+# pacman 7 confines its downloader with Landlock and drops to the alpm user;
+# neither works in the ARM container, and v0.3.0 shipped with no package for it.
+check "the pacman sandbox is disabled"      grep -q -- '--disable-sandbox' "$WF"
 
 (( fails == 0 )) && echo "all ok" || echo "$fails failed"
 exit $(( fails > 0 ))
