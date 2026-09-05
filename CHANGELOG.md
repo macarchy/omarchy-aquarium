@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/macarchy/omarchy-aquarium/compare/v0.3.0...v0.3.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** let pacman work inside the Arch ARM container ([#12](https://github.com/macarchy/omarchy-aquarium/issues/12)) ([6052146](https://github.com/macarchy/omarchy-aquarium/commit/60521465c95b9ad7ae705ecc1942bd6ab5cd7da0))
+
 ## [0.3.0](https://github.com/macarchy/omarchy-aquarium/compare/v0.2.1...v0.3.0) (2026-09-05)
 
 
