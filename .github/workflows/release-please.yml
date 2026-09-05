@@ -84,7 +84,18 @@ jobs:
         # makepkg refuses to run as root, so it gets a throwaway user.
         # --nodeps because `depends` is a runtime contract for the target machine.
         run: |
-          pacman -Syu --noconfirm --needed git github-cli wayland wayland-protocols mesa libglvnd pkgconf
+          # --disable-sandbox: pacman 7 confines its downloader with Landlock and
+          # drops to the `alpm` user, and neither works in this container --
+          # "the Landlock ruleset could not be applied: Operation not permitted",
+          # then "switching to sandbox user 'alpm' failed". v0.3.0 published with
+          # no package because of it. The four arch=('any') repos build in
+          # archlinux:base-devel and never hit this; it is specific to the ARM
+          # image, so the flag lives here and not in their copies of this job.
+          #
+          # It weakens only the DOWNLOADER's confinement inside a throwaway CI
+          # container, and every package still has its signature checked.
+          pacman -Syu --noconfirm --needed --disable-sandbox \
+            git github-cli wayland wayland-protocols mesa libglvnd pkgconf
           # The tag is the truth. Rewriting pkgver here means the package can
           # never carry a version the release does not, and release-please needs
           # no extra-files entry to keep them in step.
