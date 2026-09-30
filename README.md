@@ -1,3 +1,5 @@
+![omarchy-aquarium banner](.github/banner.png)
+
 # omarchy-aquarium
 
 ![the aquarium, moving](docs/media/aquarium.gif)
